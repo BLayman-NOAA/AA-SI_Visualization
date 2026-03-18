@@ -2,16 +2,16 @@
 
 <div align="center">
 
-# NOAA Fisheries AA-SI Python Package Template
+# AA-SI Visualization
 
-**A modern Python package template for NOAA Fisheries Active Acoustics Strategic Initiative projects**
+**Visualization tools for NOAA Fisheries Active Acoustics Strategic Initiative (AA-SI) echogram and sonar data**
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
+[Overview](#overview) •
 [Getting Started](#getting-started) •
-[Customization Checklist](#customization-checklist) •
 [Development](#development) •
 [Project Structure](#project-structure)
 
@@ -19,79 +19,31 @@
 
 ---
 
+## Overview
+
+`aa-si-visualization` provides echogram plotting and visualization utilities for
+active acoustics data processed through the AA-SI pipeline. Key capabilities include:
+
+- **Sv echograms** — plot volume backscattering strength with configurable depth, ping range, and color scales
+- **Cluster echograms** — visualize ML clustering results with categorical coloring
+- **ML feature echograms** — display regridded/normalized ML feature data
+- **Calibration difference echograms** — side-by-side comparison of baseline vs. calibrated Sv with difference panels
+- **Flexible axes** — x-axis in seconds, pings, bins, or meters; y-axis in meters or range samples
+- **Overlay lines** — add annotation lines on echogram plots
+
 ## Getting Started
-
-### Use This Template
-
-1. Click the **"Use this template"** button on GitHub
-2. Name your new repository
-3. Clone your new repository locally
-4. Follow the [Customization Checklist](#customization-checklist) below
 
 ### Requirements
 
 - Python 3.10 or higher
 - pip
 
----
-
-## Customization Checklist
-
-After creating your repository from this template, complete the following steps:
-
-### 1. Rename the Package
-
-Replace all instances of `mypackagename` with your actual package name:
-
-| Location | Action |
-|----------|--------|
-| `src/mypackagename/` | Rename the folder |
-| `pyproject.toml` | Update `name`, URLs, and tool paths |
-| `src/mypackagename/__init__.py` | Update imports and docstring |
-| `tests/test_package.py` | Update import statements |
-
-### 2. Update Project Metadata
-
-Edit `pyproject.toml`:
-
-- `name` - Your package name
-- `version` - Start with `0.1.0`
-- `description` - Brief description of your package
-- `authors` / `maintainers` - Your information
-- `keywords` - Relevant search terms
-
-### 3. Update URLs
-
-In `pyproject.toml`, update `[project.urls]` with your repository information.
-
-### 4. Add Dependencies
-
-Add your package dependencies to the `dependencies` list in `pyproject.toml`.
-
-### 5. Update Documentation
-
-| File | Action |
-|------|--------|
-| `README.md` | Replace with your project documentation |
-| `CHANGELOG.md` | Update links to your repository |
-| `NOTICE` | Update copyright information |
-| `LICENSE` | Verify Apache 2.0 meets your needs |
-
-### 6. Clean Up
-
-- Delete this checklist section after completing setup
-- Make your first commit
-
----
-
-## Development
-
 ### Installation
 
 ```bash
 # Clone the repository
-git clone https://github.com/nmfs-ost/your-repo-name.git
-cd your-repo-name
+git clone https://github.com/nmfs-ost/AA-SI_Visualization.git
+cd AA-SI_Visualization
 
 # Create a virtual environment
 python -m venv .venv
@@ -104,18 +56,32 @@ pip install -e ".[dev]"
 pre-commit install
 ```
 
+## Usage
+
+```python
+from aa_si_visualization import plot_sv_echogram, plot_cluster_echogram
+
+# Plot a standard Sv echogram
+plot_sv_echogram(ds_Sv, frequency_nominal=frequencies)
+
+# Plot ML cluster results
+plot_cluster_echogram(ds_ml_ready, dataset_name="my_model", specific_data_name="clusters")
+```
+
+## Development
+
 ### Running Tests
 
 ```bash
 pytest
-pytest --cov=mypackagename
+pytest --cov=aa_si_visualization
 ```
 
 ### Code Quality
 
 ```bash
 black src/ tests/
-pylint src/mypackagename
+pylint src/aa_si_visualization
 pre-commit run --all-files
 ```
 
@@ -140,8 +106,11 @@ python -m build
 ├── pyproject.toml
 ├── README.md
 ├── src/
-│   └── mypackagename/
-│       └── __init__.py
+│   └── aa_si_visualization/
+│       ├── __init__.py
+│       ├── assorted.py
+│       ├── echogram.py
+│       └── echogram_handlers.py
 └── tests/
     ├── conftest.py
     └── test_package.py
@@ -151,7 +120,7 @@ python -m build
 
 ## License
 
-This template uses the Apache License 2.0. Verify this license meets your project requirements before use.
+This project uses the Apache License 2.0. See [LICENSE](LICENSE) for details.
 
 ---
 

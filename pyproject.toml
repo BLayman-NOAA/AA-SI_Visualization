@@ -3,23 +3,26 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "mypackagename"
+name = "aa-si-visualization"
 version = "0.1.0"
-description = "A template Python package for NOAA Fisheries AA-SI projects."
+description = "Visualization tools for NOAA Fisheries Active Acoustics Strategic Initiative (AA-SI) echogram and sonar data."
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.10"
 authors = [
-    { name = "Your Name", email = "your.name@noaa.gov" },
+    { name = "NOAA Fisheries", email = "" },
 ]
 maintainers = [
-    { name = "Your Name", email = "your.name@noaa.gov" },
+    { name = "NOAA Fisheries", email = "" },
 ]
 keywords = [
     "noaa",
     "fisheries",
     "acoustics",
-    # TODO: Add your package-specific keywords
+    "echogram",
+    "visualization",
+    "sonar",
+    "echosounder",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -34,9 +37,11 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 dependencies = [
-    # Add your package dependencies here, e.g.:
-    # "numpy>=1.21.0",
-    # "pandas>=1.3.0",
+    "numpy>=1.21.0",
+    "xarray>=2022.3.0",
+    "matplotlib>=3.5.0",
+    "echopype>=0.6.0",
+    "aa-si-utils @ git+https://github.com/BLayman-NOAA/AA-SI_Utils.git",
 ]
 
 [project.optional-dependencies]
@@ -54,11 +59,11 @@ docs = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/nmfs-ost/mypackagename"
-Documentation = "https://nmfs-ost.github.io/mypackagename/"
-Repository = "https://github.com/nmfs-ost/mypackagename.git"
-Issues = "https://github.com/nmfs-ost/mypackagename/issues"
-Changelog = "https://github.com/nmfs-ost/mypackagename/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/nmfs-ost/AA-SI_Visualization"
+Documentation = "https://nmfs-ost.github.io/AA-SI_Visualization/"
+Repository = "https://github.com/nmfs-ost/AA-SI_Visualization.git"
+Issues = "https://github.com/nmfs-ost/AA-SI_Visualization/issues"
+Changelog = "https://github.com/nmfs-ost/AA-SI_Visualization/blob/main/CHANGELOG.md"
 
 # =============================================================================
 # Tool Configuration
@@ -71,7 +76,7 @@ include = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/mypackagename"]
+packages = ["src/aa_si_visualization"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -83,7 +88,7 @@ addopts = [
 ]
 
 [tool.coverage.run]
-source = ["src/mypackagename"]
+source = ["src/aa_si_visualization"]
 branch = true
 
 [tool.coverage.report]

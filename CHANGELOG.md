@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Echogram plotting with configurable depth, ping range, and color scales
+- Cluster echogram visualization with categorical coloring
+- ML feature echogram display for regridded/normalized data
+- Calibration difference echograms (baseline vs. calibrated Sv)
+- Flexible axis options (seconds, pings, bins, meters; meters or range samples)
+- Overlay line support for echogram annotation
 - Initial project structure from NOAA Fisheries AA-SI Python template
 
 ### Changed
