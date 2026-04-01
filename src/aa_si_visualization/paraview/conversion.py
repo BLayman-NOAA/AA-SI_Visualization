@@ -26,7 +26,6 @@ def sv_dataset_to_vtk(ds_Sv, output_path, channel_index_for_bounds=0):
 
     sv_data_all_channels = ds_Sv["Sv"].values  # (channel, ping_time, range_sample)
     ping_times = ds_Sv["ping_time"].values
-    range_samples = ds_Sv["range_sample"].values
     echo_range = ds_Sv["echo_range"].isel(channel=channel_index_for_bounds).values
     frequencies = ds_Sv["frequency_nominal"].values
 

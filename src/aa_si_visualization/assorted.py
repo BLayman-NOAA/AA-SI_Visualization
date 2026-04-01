@@ -1,18 +1,16 @@
-import echopype as ep 
-from pathlib import Path
+"""Assorted visualization utilities for calibration comparison panels."""
+
 import numpy as np
-import xarray as xr
 import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
 from aa_si_utils import utils
 
 
 def sv_differences_echograms(ds_Sv_baseline, ds_Sv_calibrated, frequencies, max_depth=None, min_depth=None, ping_min=None, ping_max=None, sv_scale_min=-80, sv_scale_max=-20, sv_scale_diff_min=-15, sv_scale_diff_max=15, sv_cmap='viridis', diff_cmap='RdBu_r', x_axis_units='pings', y_axis_units='meters', meters_per_second=None, y_to_x_aspect_ratio_override=None):
-    """
-    
-    Generates a multi-panel figure showing baseline Sv, calibrated Sv, and difference
-    echograms for each frequency. Provides visual comparison of calibration effects
-    across frequencies, depths, and ping times.
+    """Generate multi-panel baseline / calibrated / difference echograms.
+
+    Creates a figure with three columns (baseline Sv, calibrated Sv, and their
+    difference) for each valid frequency.  Frequencies that contain only NaN
+    data are automatically excluded.
     
     Args:
         ds_Sv_baseline: Baseline Sv dataset
@@ -31,6 +29,7 @@ def sv_differences_echograms(ds_Sv_baseline, ds_Sv_calibrated, frequencies, max_
         x_axis_units (str): X-axis units: 'pings' (default), 'seconds', or 'meters'
         y_axis_units (str): Y-axis units: 'meters' (default) or 'range_sample'
         meters_per_second (float, optional): Speed for converting time to distance (required for x_axis_units='meters')
+        y_to_x_aspect_ratio_override (float, optional): Override for the y-to-x aspect ratio
     """
     # Set default ping range if not provided
     if ping_min is None:
@@ -104,20 +103,13 @@ def sv_differences_echograms(ds_Sv_baseline, ds_Sv_calibrated, frequencies, max_
 
     num_freqs = len(freq_labels)    
 
-    # Subplot layout: 3 columns (baseline, CAL file, difference) x  rows (frequencies)
+    # Subplot layout: 3 columns (baseline, calibrated, difference) x N rows (frequencies)
     for plot_idx, (freq_idx, freq_label) in enumerate(zip(valid_freq_indices, freq_labels)):
     
         # Get data for this frequency
         baseline_data = ds_Sv_baseline['Sv'].isel(channel=freq_idx, ping_time=slice(ping_min, ping_max), range_sample=slice(min_depth_index, max_depth_index))
         cal_data = ds_Sv_calibrated['Sv'].isel(channel=freq_idx, ping_time=slice(ping_min, ping_max), range_sample=slice(min_depth_index, max_depth_index))
         diff_data = sv_diff_data.isel(channel=freq_idx, ping_time=slice(ping_min, ping_max), range_sample=slice(min_depth_index, max_depth_index))
-        
-        
-        # Get data for this frequency
-        baseline_data = ds_Sv_baseline['Sv'].isel(channel=freq_idx, ping_time=slice(ping_min, ping_max), range_sample=slice(min_depth_index, max_depth_index))
-        cal_data = ds_Sv_calibrated['Sv'].isel(channel=freq_idx, ping_time=slice(ping_min, ping_max), range_sample=slice(min_depth_index, max_depth_index))
-        diff_data = sv_diff_data.isel(channel=freq_idx, ping_time=slice(ping_min, ping_max), range_sample=slice(min_depth_index, max_depth_index))
-        
         
         # Baseline echogram
         ax1 = plt.subplot(num_freqs, 3, plot_idx*3 + 1)
@@ -132,13 +124,12 @@ def sv_differences_echograms(ds_Sv_baseline, ds_Sv_calibrated, frequencies, max_
         if plot_idx == 0:
             sv_image = im1
 
-        # CAL file echogram
+        # Calibrated echogram
         ax2 = plt.subplot(num_freqs, 3, plot_idx*3 + 2)
         ax2.imshow(cal_data.T, aspect=aspect_ratio,
                         vmin=sv_scale_min, vmax=sv_scale_max, cmap=sv_cmap,
                         extent=extent)
         ax2.set_title(f'{freq_label} - CAL Report Calibration', fontsize=12, fontweight='bold', pad=20)
-        # ax2.set_xlabel(x_label, fontsize=10)
         
         # Difference echogram
         ax3 = plt.subplot(num_freqs, 3, plot_idx*3 + 3)
@@ -146,7 +137,6 @@ def sv_differences_echograms(ds_Sv_baseline, ds_Sv_calibrated, frequencies, max_
                         vmin=sv_scale_diff_min, vmax=sv_scale_diff_max, cmap=diff_cmap,
                         extent=extent)
         ax3.set_title(f'{freq_label} - Difference (CAL - Baseline)', fontsize=12, fontweight='bold', pad=20)
-        # ax3.set_xlabel(x_label, fontsize=10)
         
         # Store first difference image for shared colorbar
         if plot_idx == 0:
@@ -173,7 +163,6 @@ def sv_differences_echograms(ds_Sv_baseline, ds_Sv_calibrated, frequencies, max_
                 fontsize=16, fontweight='bold', y=0.96)
     plt.show()
 
-# Helper functions
 
 def _setup_depth_range_and_indices(dataset, min_depth, max_depth, ping_min, ping_max):
     """

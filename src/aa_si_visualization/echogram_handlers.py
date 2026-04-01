@@ -1,6 +1,9 @@
-"""
-Echogram Data Handlers
-Strategy pattern implementation for handling different echogram data structures.
+"""Strategy-pattern handlers for different echogram data structures.
+
+Each handler knows how to detect its dataset layout, calculate depth/ping
+ranges, and slice data for a single frequency or feature.  The public
+:func:`create_handler` factory inspects an :class:`xarray.Dataset` and
+returns the appropriate handler subclass.
 """
 
 import numpy as np
@@ -210,11 +213,6 @@ class MvbsDataHandler(EchogramDataHandler):
             
             self.ping_min_converted = ping_min_mvbs
             self.ping_max_converted = ping_max_mvbs
-            
-            print(f"DEBUG: Original ping range {ping_min}-{ping_max}")
-            print(f"DEBUG: Original times {target_start_time} to {target_end_time}")
-            print(f"DEBUG: MVBS ping range {ping_min_mvbs}-{ping_max_mvbs}")
-            print(f"DEBUG: MVBS times {self.ping_times[ping_min_mvbs]} to {self.ping_times[ping_max_mvbs]}")
         else:
             # Use full range if no conversion info available
             self.ping_min_converted = 0
@@ -252,12 +250,16 @@ class MvbsDataHandler(EchogramDataHandler):
         return self.dataset[self.sv_variable_name].isel(**slice_dict)
     
     def is_mvbs_structured(self):
-        """MVBS is MVBS structured."""
+        """Return ``True`` — MVBS data is always MVBS structured."""
         return True
 
 
 class MlSvDataHandler(SvDataHandler):
-    """Handler for ML data derived from regular Sv."""
+    """Handler for ML data derived from regular Sv.
+
+    Extends :class:`SvDataHandler` with automatic discovery of
+    grid coordinates and feature dimensions used by the ML pipeline.
+    """
     
     def detect_structure(self):
         """Analyze ML-Sv structure and discover grid coordinates."""
@@ -298,7 +300,11 @@ class MlSvDataHandler(SvDataHandler):
 
 
 class MlMvbsDataHandler(MvbsDataHandler):
-    """Handler for ML data derived from MVBS."""
+    """Handler for ML data derived from MVBS.
+
+    Extends :class:`MvbsDataHandler` with automatic discovery of
+    grid coordinates and feature dimensions used by the ML pipeline.
+    """
     
     def detect_structure(self):
         """Analyze ML-MVBS structure and discover grid coordinates."""
@@ -398,9 +404,6 @@ class ClusterDataHandler(EchogramDataHandler):
             
             self.ping_min_converted = ping_min_mvbs
             self.ping_max_converted = ping_max_mvbs
-            
-            print(f"DEBUG: Cluster MVBS - Original ping range {ping_min}-{ping_max}")
-            print(f"DEBUG: Cluster MVBS - Converted to bins {ping_min_mvbs}-{ping_max_mvbs}")
         else:
             # Use indices directly for Sv-structured or when no conversion available
             self.ping_min_converted = ping_min

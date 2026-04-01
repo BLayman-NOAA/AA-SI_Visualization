@@ -1,10 +1,16 @@
-"""
-Echogram Data Handlers
-Strategy pattern implementation for handling different echogram data structures.
+"""Core echogram plotting functions for the AA-SI visualization package.
+
+Provides a pipeline-based architecture for rendering Sv, MVBS, ML-feature,
+and cluster-result echograms with configurable axes, colormaps, and overlay
+lines.  The public API consists of:
+
+- :func:`plot_sv_echogram` — regular Sv or MVBS data
+- :func:`plot_flattened_data_echogram` — ML-processed (normalised/reshaped) data
+- :func:`plot_cluster_echogram` — clustering results
+- :func:`plot_processed_echogram_main` — low-level orchestrator used by the above
 """
 
 import numpy as np
-from abc import ABC, abstractmethod
 from aa_si_utils import utils
 from .echogram_handlers import create_handler
 
@@ -19,7 +25,7 @@ def _setup_parameters(ds_Sv, frequency_nominal, max_depth, min_depth, ping_min, 
     Setup and validate all parameters for echogram plotting.
     
     Args:
-        All parameters from plot_processed_echogram()
+        All parameters from plot_processed_echogram_main()
         
     Returns:
         dict: Consolidated parameters with defaults applied and ML variable name constructed
@@ -77,7 +83,7 @@ def _setup_parameters(ds_Sv, frequency_nominal, max_depth, min_depth, ping_min, 
 def _prepare_ml_data(ds_Sv, params):
     """
     Prepare ML data by regridding if needed, or return regular Sv variable name.
-    Simplified version that relies on handler for cluster detection.
+    Relies on handler for cluster detection.
     
     Args:
         ds_Sv: Dataset containing the data
@@ -347,10 +353,9 @@ def _create_cluster_colormap(cluster_analysis, base_colors=None):
             - cmap: matplotlib ListedColormap for clusters
             - norm: matplotlib BoundaryNorm for discrete boundaries
             - tick_positions: List of positions for colorbar ticks
-            - tick_labels: List of labels for colorbar ticksd
+            - tick_labels: List of labels for colorbar ticks
     """
     import matplotlib.colors as mcolors
-    import colorsys
     
     unique_labels = cluster_analysis['unique_labels']
     min_label = cluster_analysis['min_label']
@@ -611,7 +616,7 @@ def _calculate_x_axis_meters(handler, ping_times, ping_range, is_mvbs, meters_pe
         original_ping_max = handler.ping_max if hasattr(handler, 'ping_max') else ping_max
         
         print("Using GPS calculation for meters_per_second...")
-        # TODO: Verify if this is using the correct index based on lining up ping time and lat/long time!
+        # TODO: Verify index alignment between ping_time and Platform lat/lon timestamps
         start_lat = echodata["Platform"]["latitude"][original_ping_min]
         start_lon = echodata["Platform"]["longitude"][original_ping_min]
         end_lat = echodata["Platform"]["latitude"][original_ping_max]
@@ -690,14 +695,12 @@ def _calculate_x_axis_with_handler(handler, ping_times, ping_range, x_axis_units
 # ==================== HELPER FUNCTIONS FOR PLOTTING ====================
 
 def _calculate_y_axis_extent_local(min_depth_shown, max_depth_shown, min_depth_index, max_depth_index, y_axis_units, data_type=None):
-    """
-    Helper function to calculate y-axis extent and labels based on units.
-    This is a local copy to avoid importing from visualization.py.
-    
+    """Calculate y-axis extent and label string based on the requested units.
+
     Args:
-        min_depth_shown: Minimum depth value in meters
-        max_depth_shown: Maximum depth value in meters
-        min_depth_index: Minimum depth index
+        min_depth_shown: Minimum depth value in meters.
+        max_depth_shown: Maximum depth value in meters.
+        min_depth_index: Minimum depth index.
         max_depth_index: Maximum depth index
         y_axis_units: Units for y-axis ('meters', 'range_sample', 'bins')
         data_type: Type of data (for validation, optional)
@@ -733,10 +736,8 @@ def _calculate_y_axis_extent_local(min_depth_shown, max_depth_shown, min_depth_i
 
 
 def _calculate_plot_dimensions_and_aspect_local(x_extent_min, x_extent_max, y_extent_min, y_extent_max, y_to_x_aspect_ratio_override=None):
-    """
-    Helper function to calculate plot dimensions and aspect ratio.
-    This is a local copy to avoid importing from visualization.py.
-    
+    """Calculate plot extent, aspect ratio, and figure-size multipliers.
+
     Args:
         x_extent_min: Minimum x-axis extent
         x_extent_max: Maximum x-axis extent
@@ -771,7 +772,6 @@ def _calculate_plot_dimensions_and_aspect_local(x_extent_min, x_extent_max, y_ex
     return extent, aspect_ratio, width_multiplier, height_multiplier
 
 
-# Update _calculate_axes to use local helper functions
 def _calculate_axes(handler, ranges, params, echodata):
     """
     Calculate x-axis and y-axis extents and plot dimensions.
@@ -849,26 +849,19 @@ def _add_overlay_line(ax, ds, line_spec, ping_min, ping_max, axes_config):
     
     Supports dataset variable reference with automatic coordinate transformation.
     
-    Parameters:
-    -----------
-    ax : matplotlib.axes.Axes
-        Subplot to add line to
-    ds : xarray.Dataset
-        Dataset containing overlay variables
-    line_spec : dict
-        Line specification: {'var': 'variable_name', 'style': {...}}
-    ping_min : int
-        Start ping index for current plot window
-    ping_max : int
-        End ping index for current plot window
-    axes_config : dict
-        Axis configuration from _calculate_axes() containing x-axis extent info
+    Args:
+        ax (matplotlib.axes.Axes): Subplot to add line to.
+        ds (xarray.Dataset): Dataset containing overlay variables.
+        line_spec (dict): Line specification: ``{'var': 'variable_name', 'style': {...}}``.
+        ping_min (int): Start ping index for current plot window.
+        ping_max (int): End ping index for current plot window.
+        axes_config (dict): Axis configuration from ``_calculate_axes()`` containing
+            x-axis extent info.
         
-    Notes:
-    ------
-    - Y-axis: Variable values in meters (must match echogram depth units)
-    - X-axis: Automatically transformed to match echogram's x-axis units
-    - Automatically removes NaN values for clean line display
+    Note:
+        - Y-axis: Variable values in meters (must match echogram depth units)
+        - X-axis: Automatically transformed to match echogram's x-axis units
+        - Automatically removes NaN values for clean line display
     """
     var_name = line_spec['var']
     
@@ -1110,65 +1103,67 @@ def plot_processed_echogram_main(ds_Sv, frequency_nominal, max_depth=None, min_d
     """
     Create an echogram plot for MVBS (gridded), regular Sv data, or ML/normalized data.
     
-    This is the refactored version using the handler pattern and pipeline architecture.
-    Clean orchestration with each stage isolated into its own function.
+    This is the main orchestrator using the handler pattern and pipeline architecture.
+    Each stage is isolated into its own function for maintainability.
     
-    Parameters:
-    -----------
-    ds_Sv : xarray.Dataset
-        Either MVBS dataset (gridded), regular Sv dataset, or ML-ready dataset to plot
-    frequency_nominal : array-like
-        Nominal frequencies for each channel
-    max_depth : float, optional
-        Maximum depth to display in meters (default: auto-detect from data)
-    min_depth : float, optional
-        Minimum depth to display in meters (default: auto-detect from data)
-    ping_min, ping_max : int, optional
-        Ping range to display as indices in the ORIGINAL Sv data (if None, uses full range)
-        For MVBS data, these will be converted to appropriate MVBS indices
-    sv_vmin, sv_vmax : float
-        Color scale limits (dB) for Sv data (default: -80 to -20)
-    sv_cmap : str
-        Colormap for Sv data (default: 'viridis')
-    ds_Sv_original : xarray.Dataset, optional
-        Original Sv dataset (needed for MVBS data to convert ping indices properly)
-    use_corrected_Sv : bool
-        Whether to use 'Sv_corrected' instead of 'Sv' (default: False)
-    x_axis_units : str
-        X-axis units: 'seconds' (default), 'pings', 'bins' (MVBS only), or 'meters'
-    y_axis_units : str
-        Y-axis units: 'meters' (default), 'range_sample', or 'bins' (MVBS only)
-    meters_per_second : float, optional
-        Speed in meters/second for converting time to distance (required for x_axis_units='meters')
-    y_to_x_aspect_ratio_override : float, optional
-        Override aspect ratio for plot
-    ml_vmin, ml_vmax : float, optional
-        Color scale limits for ML data (if None, auto-determined from data)
-    echodata : xarray.Dataset, optional
-        Original echodata for GPS calculations when meters_per_second not provided
-    ml_dataset_name : str, optional
-        Name of ML dataset to plot
-    ml_specific_data_name : str, optional
-        Specific ML data name within the dataset
+    Args:
+        ds_Sv (xarray.Dataset): Either MVBS dataset (gridded), regular Sv dataset,
+            or ML-ready dataset to plot.
+        frequency_nominal (array-like): Nominal frequencies for each channel.
+        max_depth (float, optional): Maximum depth to display in meters.
+            Defaults to auto-detect from data.
+        min_depth (float, optional): Minimum depth to display in meters.
+            Defaults to auto-detect from data.
+        ping_min (int, optional): Start ping index in the ORIGINAL Sv data.
+            For MVBS data, converted to appropriate MVBS indices. Defaults to 0.
+        ping_max (int, optional): End ping index in the ORIGINAL Sv data.
+            Defaults to last ping.
+        sv_vmin (float): Minimum color scale limit in dB. Defaults to -80.
+        sv_vmax (float): Maximum color scale limit in dB. Defaults to -20.
+        sv_cmap (str): Colormap for Sv data. Defaults to ``'viridis'``.
+        ds_Sv_original (xarray.Dataset, optional): Original Sv dataset (needed
+            for MVBS data to convert ping indices properly).
+        use_corrected_Sv (bool): Whether to use ``'Sv_corrected'`` instead of
+            ``'Sv'``. Defaults to ``False``.
+        x_axis_units (str): X-axis units: ``'seconds'`` (default), ``'pings'``,
+            ``'bins'`` (MVBS only), or ``'meters'``.
+        y_axis_units (str): Y-axis units: ``'meters'`` (default),
+            ``'range_sample'``, or ``'bins'`` (MVBS only).
+        meters_per_second (float, optional): Speed in m/s for converting time
+            to distance (required for ``x_axis_units='meters'``).
+        y_to_x_aspect_ratio_override (float, optional): Override aspect ratio
+            for plot.
+        ml_vmin (float, optional): Minimum color scale limit for ML data.
+            Auto-determined from data if ``None``.
+        ml_vmax (float, optional): Maximum color scale limit for ML data.
+            Auto-determined from data if ``None``.
+        echodata (xarray.Dataset, optional): Original echodata for GPS
+            calculations when ``meters_per_second`` is not provided.
+        ml_dataset_name (str, optional): Name of ML dataset to plot.
+        ml_specific_data_name (str, optional): Specific ML data name within
+            the dataset.
+        cluster_colors (list, optional): List of hex color strings for cluster
+            visualization.
+        overlay_lines (list, optional): List of line specification dicts for
+            overlay lines.
         
     Examples:
-    ---------
-    # Plot regular Sv data
-    plot_processed_echogram_new(ds_Sv, frequency_nominal)
-    
-    # Plot MVBS data with original Sv for ping conversion
-    plot_processed_echogram_new(ds_Sv_mvbs, frequency_nominal, 
-                               ds_Sv_original=ds_Sv, 
-                               ping_min=100, ping_max=800)
-    
-    # Plot ML data
-    plot_processed_echogram_new(ds_ml_ready, frequency_nominal,
-                               ml_dataset_name='ml_data_clean',
-                               ml_specific_data_name='normalized')
+        >>> # Plot regular Sv data
+        >>> plot_processed_echogram_main(ds_Sv, frequency_nominal)
+        
+        >>> # Plot MVBS data with original Sv for ping conversion
+        >>> plot_processed_echogram_main(ds_Sv_mvbs, frequency_nominal,
+        ...                             ds_Sv_original=ds_Sv,
+        ...                             ping_min=100, ping_max=800)
+        
+        >>> # Plot ML data
+        >>> plot_processed_echogram_main(ds_ml_ready, frequency_nominal,
+        ...                             ml_dataset_name='ml_data_clean',
+        ...                             ml_specific_data_name='normalized')
     """
     
     print("=" * 60)
-    print("REFACTORED PLOT_PROCESSED_ECHOGRAM - Using Handler Pipeline")
+    print("PLOT PROCESSED ECHOGRAM — Handler Pipeline")
     print("=" * 60)
     
     # ===== STAGE 1: SETUP PARAMETERS =====
@@ -1239,50 +1234,52 @@ def plot_cluster_echogram(ds_ml_ready, dataset_name, specific_data_name,
     Automatically handles both Sv-derived and MVBS-derived cluster data.
     Uses categorical colormap with distinct colors for each cluster.
     
-    Parameters:
-    -----------
-    ds_ml_ready : xarray.Dataset
-        Dataset containing cluster results
-    specific_data_name : str
-        Name of cluster result to plot (e.g., 'kmeans_clusters', 'dbscan_clusters')
-    dataset_name : str
-        Base dataset name (default: 'ml_data_clean')
-    max_depth, min_depth : float, optional
-        Depth range in meters (auto-detected from data if None)
-    ping_min, ping_max : int, optional
-        Ping range to display (default: 100 to 800)
-        For MVBS-derived data, these are converted to MVBS bin indices
-    x_axis_units : str
-        X-axis units: 'seconds' (default), 'pings', 'bins' (MVBS only), or 'meters'
-    y_axis_units : str
-        Y-axis units: 'meters' (default), 'range_sample', or 'bins' (MVBS only)
-    meters_per_second : float, optional
-        Speed for 'meters' x-axis (auto-calculated from GPS if echodata provided)
-    echodata : xarray.Dataset, optional
-        Original echodata for GPS-based calculations
-    y_to_x_aspect_ratio_override : float, optional
-        Override aspect ratio
-    gridded_data : xarray.DataArray, optional
-        Pre-gridded cluster data (if None, will regrid from flattened format)
-    ds_Sv_original : xarray.Dataset, optional
-        Original Sv dataset (needed for MVBS-derived data to convert ping indices)
+    Args:
+        ds_ml_ready (xarray.Dataset): Dataset containing cluster results.
+        dataset_name (str): Base dataset name (e.g., ``'ml_data_clean'``).
+        specific_data_name (str): Name of cluster result to plot
+            (e.g., ``'kmeans_clusters'``, ``'dbscan_clusters'``).
+        max_depth (float, optional): Maximum depth in meters.
+            Auto-detected from data if ``None``.
+        min_depth (float, optional): Minimum depth in meters.
+            Auto-detected from data if ``None``.
+        ping_min (int, optional): Start ping index. Defaults to 100.
+            For MVBS-derived data, converted to MVBS bin indices.
+        ping_max (int, optional): End ping index. Defaults to 800.
+        x_axis_units (str): X-axis units: ``'seconds'`` (default), ``'pings'``,
+            ``'bins'`` (MVBS only), or ``'meters'``.
+        y_axis_units (str): Y-axis units: ``'meters'`` (default),
+            ``'range_sample'``, or ``'bins'`` (MVBS only).
+        meters_per_second (float, optional): Speed for ``'meters'`` x-axis
+            (auto-calculated from GPS if ``echodata`` provided).
+        echodata (xarray.Dataset, optional): Original echodata for GPS-based
+            calculations.
+        y_to_x_aspect_ratio_override (float, optional): Override aspect ratio.
+        gridded_data (xarray.DataArray, optional): Pre-gridded cluster data.
+            If ``None``, will regrid from flattened format.
+        ds_Sv_original (xarray.Dataset, optional): Original Sv dataset (needed
+            for MVBS-derived data to convert ping indices).
+        cluster_colors (list, optional): List of hex color strings for cluster
+            visualization.
+        overlay_lines (list, optional): List of line specification dicts for
+            overlay lines.
         
     Examples:
-    ---------
-    # Basic usage with K-means results
-    plot_cluster_echogram(ds_ml, 'kmeans_clusters')
-    
-    # With DBSCAN results and custom range
-    plot_cluster_echogram(ds_ml, 'dbscan_clusters', ping_min=200, ping_max=600)
-    
-    # MVBS-derived clusters with bin axes
-    plot_cluster_echogram(ds_ml_mvbs, 'kmeans_clusters', 
-                         ds_Sv_original=ds_Sv,
-                         x_axis_units='bins', y_axis_units='bins')
-    
-    # With custom depth range
-    plot_cluster_echogram(ds_ml, 'kmeans_clusters', 
-                         min_depth=10, max_depth=100)
+        >>> # Basic usage with K-means results
+        >>> plot_cluster_echogram(ds_ml, 'ml_data_clean', 'kmeans_clusters')
+        
+        >>> # With DBSCAN results and custom range
+        >>> plot_cluster_echogram(ds_ml, 'ml_data_clean', 'dbscan_clusters',
+        ...                      ping_min=200, ping_max=600)
+        
+        >>> # MVBS-derived clusters with bin axes
+        >>> plot_cluster_echogram(ds_ml_mvbs, 'ml_data_clean', 'kmeans_clusters',
+        ...                      ds_Sv_original=ds_Sv,
+        ...                      x_axis_units='bins', y_axis_units='bins')
+        
+        >>> # With custom depth range
+        >>> plot_cluster_echogram(ds_ml, 'ml_data_clean', 'kmeans_clusters',
+        ...                      min_depth=10, max_depth=100)
     """
     # Set default ping range if not provided
     if ping_min is None:
@@ -1383,57 +1380,59 @@ def plot_sv_echogram(ds_Sv, ds_Sv_original=None, frequency_nominal=None, min_dep
     Plot Sv echogram data (regular or MVBS).
     
     Automatically detects MVBS format and handles both regular Sv and MVBS datasets.
-    For MVBS data, ds_Sv_original is required for proper ping range conversion.
+    For MVBS data, ``ds_Sv_original`` is required for proper ping range conversion.
     
-    Parameters:
-    -----------
-    ds_Sv : xarray.Dataset
-        Sv dataset to plot (regular or MVBS)
-    frequency_nominal : array-like, optional
-        Nominal frequencies for each channel (auto-detected if None)
-    min_depth, max_depth : float, optional
-        Depth range in meters (auto-detected from data if None)
-    ping_min, ping_max : int, optional
-        Ping range to display (uses full range if None)
-        For MVBS data: IN ORIGINAL Sv INDICES (will be converted to MVBS bins)
-    sv_vmin, sv_vmax : float
-        Color scale limits in dB (default: -80 to -20)
-    sv_cmap : str
-        Colormap name (default: 'viridis')
-    use_corrected_Sv : bool
-        Use 'Sv_corrected' instead of 'Sv' (default: False)
-    x_axis_units : str
-        X-axis units: 'seconds' (default), 'pings', 'bins' (MVBS only), or 'meters'
-    y_axis_units : str
-        Y-axis units: 'meters', 'range_sample', or 'bins' (MVBS only)
-    meters_per_second : float, optional
-        Speed for 'meters' x-axis (auto-calculated from GPS if echodata provided)
-    echodata : xarray.Dataset, optional
-        Original echodata for GPS-based calculations
-    y_to_x_aspect_ratio_override : float, optional
-        Override aspect ratio
-    ds_Sv_original : xarray.Dataset, optional
-        Original Sv dataset (required for MVBS data to convert ping indices)
+    Args:
+        ds_Sv (xarray.Dataset): Sv dataset to plot (regular or MVBS).
+        ds_Sv_original (xarray.Dataset, optional): Original Sv dataset
+            (required for MVBS data to convert ping indices).
+        frequency_nominal (array-like, optional): Nominal frequencies for each
+            channel. Auto-detected if ``None``.
+        min_depth (float, optional): Minimum depth in meters.
+            Auto-detected from data if ``None``.
+        max_depth (float, optional): Maximum depth in meters.
+            Auto-detected from data if ``None``.
+        ping_min (int, optional): Start ping index. Defaults to 0.
+            For MVBS data: in ORIGINAL Sv indices (converted to MVBS bins).
+        ping_max (int, optional): End ping index. Defaults to last ping.
+        sv_vmin (float): Minimum color scale limit in dB. Defaults to -80.
+        sv_vmax (float): Maximum color scale limit in dB. Defaults to -20.
+        sv_cmap (str): Colormap name. Defaults to ``'viridis'``.
+        use_corrected_Sv (bool): Use ``'Sv_corrected'`` instead of ``'Sv'``.
+            Defaults to ``False``.
+        x_axis_units (str): X-axis units: ``'seconds'`` (default), ``'pings'``,
+            ``'bins'`` (MVBS only), or ``'meters'``.
+        y_axis_units (str): Y-axis units: ``'meters'``, ``'range_sample'``, or
+            ``'bins'`` (MVBS only).
+        meters_per_second (float, optional): Speed for ``'meters'`` x-axis
+            (auto-calculated from GPS if ``echodata`` provided).
+        echodata (xarray.Dataset, optional): Original echodata for GPS-based
+            calculations.
+        y_to_x_aspect_ratio_override (float, optional): Override aspect ratio.
+        overlay_lines (list, optional): List of line specification dicts for
+            overlay lines.
         
     Examples:
-    ---------
-    # Basic usage - regular Sv
-    plot_sv_echogram(ds_Sv)
-    
-    # Basic usage - MVBS
-    plot_sv_echogram(ds_Sv_mvbs, ds_Sv_original=ds_Sv)
-    
-    # With custom depth and color range
-    plot_sv_echogram(ds_Sv, min_depth=10, max_depth=100, sv_vmin=-70, sv_vmax=-30)
-    
-    # MVBS with custom ping range (in original Sv indices)
-    plot_sv_echogram(ds_Sv_mvbs, ds_Sv_original=ds_Sv, ping_min=100, ping_max=800)
-    
-    # With distance on x-axis
-    plot_sv_echogram(ds_Sv, x_axis_units='meters', echodata=ed)
-    
-    # MVBS with bin axes
-    plot_sv_echogram(ds_Sv_mvbs, ds_Sv_original=ds_Sv, x_axis_units='bins', y_axis_units='bins')
+        >>> # Basic usage - regular Sv
+        >>> plot_sv_echogram(ds_Sv)
+        
+        >>> # Basic usage - MVBS
+        >>> plot_sv_echogram(ds_Sv_mvbs, ds_Sv_original=ds_Sv)
+        
+        >>> # With custom depth and color range
+        >>> plot_sv_echogram(ds_Sv, min_depth=10, max_depth=100,
+        ...                  sv_vmin=-70, sv_vmax=-30)
+        
+        >>> # MVBS with custom ping range (in original Sv indices)
+        >>> plot_sv_echogram(ds_Sv_mvbs, ds_Sv_original=ds_Sv,
+        ...                  ping_min=100, ping_max=800)
+        
+        >>> # With distance on x-axis
+        >>> plot_sv_echogram(ds_Sv, x_axis_units='meters', echodata=ed)
+        
+        >>> # MVBS with bin axes
+        >>> plot_sv_echogram(ds_Sv_mvbs, ds_Sv_original=ds_Sv,
+        ...                  x_axis_units='bins', y_axis_units='bins')
     """
     # Detect MVBS format by checking echo_range dimensions
     is_mvbs = False
@@ -1508,8 +1507,7 @@ def plot_sv_echogram(ds_Sv, ds_Sv_original=None, frequency_nominal=None, min_dep
     )
 
 
-# Used for normalized ML data
-def plot_flattend_data_echogram(ds_ml, ml_dataset_name, ds_Sv_original=None, frequency_nominal=None,
+def plot_flattened_data_echogram(ds_ml, ml_dataset_name, ds_Sv_original=None, frequency_nominal=None,
                      ml_specific_data_name=None, min_depth=None, max_depth=None,
                      ping_min=0, ping_max=None, ml_vmin=None, ml_vmax=None,
                      sv_cmap='viridis', x_axis_units='seconds', y_axis_units='meters',
@@ -1520,62 +1518,70 @@ def plot_flattend_data_echogram(ds_ml, ml_dataset_name, ds_Sv_original=None, fre
     Plot ML-processed echogram data (regular Sv-derived or MVBS-derived).
     
     Automatically detects MVBS format and handles both regular Sv and MVBS-based ML data.
-    For MVBS-derived ML data, ds_Sv_original is required for proper ping range conversion.
+    For MVBS-derived ML data, ``ds_Sv_original`` is required for proper ping range
+    conversion.
     
-    Parameters:
-    -----------
-    ds_ml : xarray.Dataset
-        Dataset containing ML data (must have flattened ML features)
-    ml_dataset_name : str
-        Name of the ML dataset variable (e.g., 'ml_data_clean')
-    frequency_nominal : array-like, optional
-        Nominal frequencies (auto-detected from ML features if None)
-    ml_specific_data_name : str, optional
-        Specific ML data name within dataset (e.g., 'normalized')
-    min_depth, max_depth : float, optional
-        Depth range in meters (auto-detected from data if None)
-    ping_min, ping_max : int, optional
-        Ping range to display (uses full range if None)
-        For MVBS-derived: IN ORIGINAL Sv INDICES (will be converted to MVBS bins)
-    ml_vmin, ml_vmax : float, optional
-        Color scale limits (auto-detected from data if None)
-    sv_cmap : str
-        Colormap name (default: 'viridis')
-    x_axis_units : str
-        X-axis units: 'seconds' (default), 'pings', 'bins' (MVBS only), or 'meters'
-    y_axis_units : str
-        Y-axis units: 'meters', 'range_sample', or 'bins' (MVBS only)
-    meters_per_second : float, optional
-        Speed for 'meters' x-axis (auto-calculated from GPS if echodata provided)
-    echodata : xarray.Dataset, optional
-        Original echodata for GPS-based calculations
-    y_to_x_aspect_ratio_override : float, optional
-        Override aspect ratio
-    ds_Sv_original : xarray.Dataset, optional
-        Original Sv dataset (required for MVBS-derived ML data to convert ping indices)
+    Args:
+        ds_ml (xarray.Dataset): Dataset containing ML data (must have flattened
+            ML features).
+        ml_dataset_name (str): Name of the ML dataset variable
+            (e.g., ``'ml_data_clean'``).
+        ds_Sv_original (xarray.Dataset, optional): Original Sv dataset (required
+            for MVBS-derived ML data to convert ping indices).
+        frequency_nominal (array-like, optional): Nominal frequencies.
+            Auto-detected from ML features if ``None``.
+        ml_specific_data_name (str, optional): Specific ML data name within
+            dataset (e.g., ``'normalized'``).
+        min_depth (float, optional): Minimum depth in meters.
+            Auto-detected from data if ``None``.
+        max_depth (float, optional): Maximum depth in meters.
+            Auto-detected from data if ``None``.
+        ping_min (int, optional): Start ping index. Defaults to 0.
+            For MVBS-derived: in ORIGINAL Sv indices (converted to MVBS bins).
+        ping_max (int, optional): End ping index. Defaults to last ping.
+        ml_vmin (float, optional): Minimum color scale limit.
+            Auto-detected from data if ``None``.
+        ml_vmax (float, optional): Maximum color scale limit.
+            Auto-detected from data if ``None``.
+        sv_cmap (str): Colormap name. Defaults to ``'viridis'``.
+        x_axis_units (str): X-axis units: ``'seconds'`` (default), ``'pings'``,
+            ``'bins'`` (MVBS only), or ``'meters'``.
+        y_axis_units (str): Y-axis units: ``'meters'``, ``'range_sample'``, or
+            ``'bins'`` (MVBS only).
+        meters_per_second (float, optional): Speed for ``'meters'`` x-axis
+            (auto-calculated from GPS if ``echodata`` provided).
+        echodata (xarray.Dataset, optional): Original echodata for GPS-based
+            calculations.
+        y_to_x_aspect_ratio_override (float, optional): Override aspect ratio.
+        overlay_lines (list, optional): List of line specification dicts for
+            overlay lines.
         
     Examples:
-    ---------
-    # Basic usage - regular Sv-derived ML
-    plot_ml_echogram(ds_ml, 'ml_data_clean')
-    
-    # Basic usage - MVBS-derived ML
-    plot_ml_echogram(ds_ml_mvbs, 'ml_data_clean', ds_Sv_original=ds_Sv)
-    
-    # With specific ML data and custom color range
-    plot_ml_echogram(ds_ml, 'ml_data_clean', ml_specific_data_name='normalized',
-                     ml_vmin=-2, ml_vmax=2)
-    
-    # MVBS-derived with custom ping range (in original Sv indices)
-    plot_ml_echogram(ds_ml_mvbs, 'ml_data_clean', ds_Sv_original=ds_Sv,
-                     ping_min=100, ping_max=800)
-    
-    # MVBS-derived with bin axes
-    plot_ml_echogram(ds_ml_mvbs, 'ml_data_clean', ds_Sv_original=ds_Sv,
-                     x_axis_units='bins', y_axis_units='bins')
-    
-    # With custom depth range
-    plot_ml_echogram(ds_ml, 'features', min_depth=10, max_depth=100)
+        >>> # Basic usage - regular Sv-derived ML
+        >>> plot_flattened_data_echogram(ds_ml, 'ml_data_clean')
+        
+        >>> # Basic usage - MVBS-derived ML
+        >>> plot_flattened_data_echogram(ds_ml_mvbs, 'ml_data_clean',
+        ...                             ds_Sv_original=ds_Sv)
+        
+        >>> # With specific ML data and custom color range
+        >>> plot_flattened_data_echogram(ds_ml, 'ml_data_clean',
+        ...                             ml_specific_data_name='normalized',
+        ...                             ml_vmin=-2, ml_vmax=2)
+        
+        >>> # MVBS-derived with custom ping range (in original Sv indices)
+        >>> plot_flattened_data_echogram(ds_ml_mvbs, 'ml_data_clean',
+        ...                             ds_Sv_original=ds_Sv,
+        ...                             ping_min=100, ping_max=800)
+        
+        >>> # MVBS-derived with bin axes
+        >>> plot_flattened_data_echogram(ds_ml_mvbs, 'ml_data_clean',
+        ...                             ds_Sv_original=ds_Sv,
+        ...                             x_axis_units='bins', y_axis_units='bins')
+        
+        >>> # With custom depth range
+        >>> plot_flattened_data_echogram(ds_ml, 'features',
+        ...                             min_depth=10, max_depth=100)
     """
     # Validation
     if ml_dataset_name is None:
@@ -1666,5 +1672,8 @@ def plot_flattend_data_echogram(ds_ml, ml_dataset_name, ds_Sv_original=None, fre
         ml_specific_data_name=ml_specific_data_name,
         overlay_lines=overlay_lines
     )
+
+
+
 
 

@@ -1,3 +1,5 @@
+"""ParaView/VTK export utilities for sonar and echogram datasets."""
+
 from .conversion import sv_dataset_to_vtk
 
 __all__ = ["sv_dataset_to_vtk"]
