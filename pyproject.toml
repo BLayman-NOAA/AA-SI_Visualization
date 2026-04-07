@@ -78,6 +78,9 @@ include = [
 [tool.hatch.build.targets.wheel]
 packages = ["src/aa_si_visualization"]
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
