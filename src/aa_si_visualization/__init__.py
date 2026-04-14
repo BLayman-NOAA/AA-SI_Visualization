@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: NOAA Fisheries
 """
-aa_si_visualization — Visualization tools for NOAA Fisheries AA-SI echogram and sonar data.
+aa_si_visualization: Visualization tools for NOAA Fisheries AA-SI echogram and sonar data.
 
 This package provides echogram plotting utilities for active-acoustics data
 processed through the AA-SI pipeline, including Sv echograms, ML feature

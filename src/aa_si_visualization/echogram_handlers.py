@@ -236,7 +236,7 @@ class MvbsDataHandler(EchogramDataHandler):
         ping_min, ping_max = ping_range
         depth_min, depth_max = depth_range
         
-        # Discover feature dimension dynamically - exclude MVBS dimensions
+        # Discover feature dimension
         feature_dim = [d for d in self.dataset[self.sv_variable_name].dims 
                       if d not in ['ping_time', 'echo_range']][0]
         
@@ -250,7 +250,7 @@ class MvbsDataHandler(EchogramDataHandler):
         return self.dataset[self.sv_variable_name].isel(**slice_dict)
     
     def is_mvbs_structured(self):
-        """Return ``True`` — MVBS data is always MVBS structured."""
+        """Return True for all MVBS data."""
         return True
 
 
@@ -327,10 +327,7 @@ class MlMvbsDataHandler(MvbsDataHandler):
         return structure_info
     
     def slice_data_for_frequency(self, freq_idx, ping_range, depth_range):
-        """
-        Slice ML-MVBS data combining MVBS logic with ML feature discovery.
-        Uses converted ping range and discovered grid coordinates.
-        """
+        """Slice ML-MVBS data using discovered grid coordinates and feature dimension."""
         ping_min, ping_max = ping_range
         depth_min, depth_max = depth_range
         
@@ -348,10 +345,7 @@ class ClusterDataHandler(EchogramDataHandler):
     """Handler for cluster result data (single-channel, no frequency dimension)."""
     
     def detect_structure(self):
-        """
-        Analyze cluster data structure - can be derived from Sv or MVBS.
-        Cluster data has shape (ping_time, range_sample) or (ping_time, echo_range).
-        """
+        """Analyze cluster data structure. Can be derived from Sv or MVBS."""
         self.echo_range_coord = self.dataset['echo_range']
         self.ping_times = self.dataset['ping_time'].values
         
@@ -374,20 +368,18 @@ class ClusterDataHandler(EchogramDataHandler):
     def calculate_depth_indices(self, min_depth, max_depth):
         """Calculate depth indices based on structure type."""
         if self.is_mvbs:
-            # MVBS logic - direct array search on 1D echo_range
+            # MVBS: direct array search
             self.min_depth_index = np.argmin(np.abs(self.echo_range_values - min_depth))
             self.max_depth_index = np.argmin(np.abs(self.echo_range_values - max_depth))
         else:
-            # Sv logic - use helper function
+            # Sv: use helper function
             self.min_depth_index = utils.get_closest_index_for_depth(self.dataset, min_depth)
             self.max_depth_index = utils.get_closest_index_for_depth(self.dataset, max_depth)
         
         return (self.min_depth_index, self.max_depth_index)
     
     def calculate_ping_range(self, ping_min, ping_max, original_ds=None):
-        """
-        Calculate ping range - convert from original Sv indices if MVBS-structured.
-        """
+        """Calculate ping range, converting from original Sv indices if MVBS-structured."""
         # Store original ping indices for GPS calculations
         self.ping_min = ping_min
         self.ping_max = ping_max
@@ -428,21 +420,18 @@ class ClusterDataHandler(EchogramDataHandler):
         return self.ping_times
     
     def slice_data_for_frequency(self, freq_idx, ping_range, depth_range):
-        """
-        Slice cluster data - ignores freq_idx since cluster data has no frequency dimension.
-        Returns slice using only ping_range and depth_range.
-        """
+        """Slice cluster data. The freq_idx parameter is ignored since cluster data has no frequency dimension."""
         ping_min, ping_max = ping_range
         depth_min, depth_max = depth_range
         
         if self.is_mvbs:
-            # MVBS structure - use echo_range
+            # MVBS structure
             return self.dataset[self.sv_variable_name].isel(
                 ping_time=slice(ping_min, ping_max),
                 echo_range=slice(depth_min, depth_max)
             )
         else:
-            # Sv structure - use range_sample
+            # Sv structure
             return self.dataset[self.sv_variable_name].isel(
                 ping_time=slice(ping_min, ping_max),
                 range_sample=slice(depth_min, depth_max)
@@ -471,7 +460,6 @@ def create_handler(ds_Sv, sv_variable_name, ml_data_variable=None):
         data_var = ds_Sv[sv_variable_name]
         data_dims = set(data_var.dims)
         
-        # Cluster data has only ping_time and range dimension (no channel/feature dim)
         is_cluster_data = (
             'ping_time' in data_dims and 
             len(data_dims) == 2 and
@@ -489,7 +477,7 @@ def create_handler(ds_Sv, sv_variable_name, ml_data_variable=None):
     if ml_data_variable is None:
         # Regular Sv or MVBS data
         if 'echo_range' in ds_Sv[sv_variable_name].coords:
-            # Check if echo_range is 1D (MVBS) or multi-dimensional (Sv)
+            # MVBS has 1D echo_range, regular Sv has multi-dimensional
             if len(ds_Sv['echo_range'].dims) == 1:
                 print("Creating MVBS handler")
                 handler = MvbsDataHandler(ds_Sv, sv_variable_name)
@@ -500,7 +488,7 @@ def create_handler(ds_Sv, sv_variable_name, ml_data_variable=None):
             print("Creating regular Sv handler (no echo_range check)")
             handler = SvDataHandler(ds_Sv, sv_variable_name)
     else:
-        # ML data - determine if derived from MVBS or regular Sv
+        # ML data
         if len(ds_Sv['echo_range'].dims) == 1:
             print("Creating ML-MVBS handler")
             handler = MlMvbsDataHandler(ds_Sv, sv_variable_name)

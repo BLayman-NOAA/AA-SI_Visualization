@@ -220,7 +220,7 @@ def _calculate_x_axis_extent(ping_times, ping_min, ping_max, x_axis_units, meter
         if meters_per_second is None:
             if echodata is None:
                 raise ValueError("echodata parameter is required when meters_per_second is not provided")
-            print("using gps calculation of meters_per_second")
+            print("Using GPS to calculate vessel speed...")
             start_lat = echodata["Platform"]["latitude"][ping_min]
             start_lon = echodata["Platform"]["longitude"][ping_min]
             end_lat = echodata["Platform"]["latitude"][ping_max]
