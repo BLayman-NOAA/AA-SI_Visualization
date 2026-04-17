@@ -6,9 +6,12 @@ ranges, and slice data for a single frequency or feature.  The public
 returns the appropriate handler subclass.
 """
 
+import logging
 import numpy as np
 from abc import ABC, abstractmethod
 from aa_si_utils import utils
+
+logger = logging.getLogger(__name__)
 
 
 class EchogramDataHandler(ABC):
@@ -467,10 +470,10 @@ def create_handler(ds_Sv, sv_variable_name, ml_data_variable=None):
         )
         
         if is_cluster_data:
-            print("Creating Cluster handler")
+            logger.info("Creating Cluster handler")
             handler = ClusterDataHandler(ds_Sv, sv_variable_name)
             structure_info = handler.detect_structure()
-            print(f"Detected structure: {structure_info['type']}")
+            logger.info("Detected structure: %s", structure_info['type'])
             return handler
     
     # Determine handler type based on data characteristics
@@ -479,26 +482,26 @@ def create_handler(ds_Sv, sv_variable_name, ml_data_variable=None):
         if 'echo_range' in ds_Sv[sv_variable_name].coords:
             # MVBS has 1D echo_range, regular Sv has multi-dimensional
             if len(ds_Sv['echo_range'].dims) == 1:
-                print("Creating MVBS handler")
+                logger.info("Creating MVBS handler")
                 handler = MvbsDataHandler(ds_Sv, sv_variable_name)
             else:
-                print("Creating regular Sv handler")
+                logger.info("Creating regular Sv handler")
                 handler = SvDataHandler(ds_Sv, sv_variable_name)
         else:
-            print("Creating regular Sv handler (no echo_range check)")
+            logger.info("Creating regular Sv handler (no echo_range check)")
             handler = SvDataHandler(ds_Sv, sv_variable_name)
     else:
         # ML data
         if len(ds_Sv['echo_range'].dims) == 1:
-            print("Creating ML-MVBS handler")
+            logger.info("Creating ML-MVBS handler")
             handler = MlMvbsDataHandler(ds_Sv, sv_variable_name)
         else:
-            print("Creating ML-Sv handler")
+            logger.info("Creating ML-Sv handler")
             handler = MlSvDataHandler(ds_Sv, sv_variable_name)
     
     # Detect and store structure information
     structure_info = handler.detect_structure()
-    print(f"Detected structure: {structure_info['type']}")
+    logger.info("Detected structure: %s", structure_info['type'])
     
     return handler
 

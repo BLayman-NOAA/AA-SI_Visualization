@@ -1,8 +1,12 @@
 """Assorted visualization utilities for calibration comparison panels."""
 
+import logging
 import numpy as np
 import matplotlib.pyplot as plt
 from aa_si_utils import utils
+from . import _plotting_utils as putils
+
+logger = logging.getLogger(__name__)
 
 
 def sv_differences_echograms(ds_Sv_baseline, ds_Sv_calibrated, frequencies, max_depth=None, min_depth=None, ping_min=None, ping_max=None, sv_scale_min=-80, sv_scale_max=-20, sv_scale_diff_min=-15, sv_scale_diff_max=15, sv_cmap='viridis', diff_cmap='RdBu_r', x_axis_units='pings', y_axis_units='meters', meters_per_second=None, y_to_x_aspect_ratio_override=None):
@@ -46,49 +50,50 @@ def sv_differences_echograms(ds_Sv_baseline, ds_Sv_calibrated, frequencies, max_
             valid_freq_indices.append(freq_idx)
             valid_frequencies.append(freq)
         else:
-            print(f"Warning: {int(freq/1000)} kHz has all NaN values - excluding from plot")
+            logger.warning("%s kHz has all NaN values, excluding from plot", int(freq/1000))
 
     if len(valid_freq_indices) == 0:
-        print("Error: All frequencies have NaN data. Cannot create plot.")
+        logger.error("All frequencies have NaN data. Cannot create plot.")
         return
 
     # Update frequencies to only include valid ones
     frequencies = valid_frequencies
 
-    # Set default depth range and calculate indices using helper function
-    min_depth, max_depth, min_depth_index, max_depth_index, min_depth_shown, max_depth_shown = _setup_depth_range_and_indices(
+    # Set default depth range and calculate indices using shared utility
+    min_depth, max_depth, min_depth_index, max_depth_index, min_depth_shown, max_depth_shown = putils.setup_depth_range(
         ds_Sv_baseline, min_depth, max_depth, ping_min, ping_max
     )
 
     # Get data dimensions and create range/time axes for plotting
     freq_labels = [f"{int(f/1000)} kHz" for f in frequencies] 
 
-    # Calculate x-axis extent using helper function
+    # Calculate x-axis extent
     ping_times = ds_Sv_baseline['ping_time'].values
-    x_extent_min, x_extent_max, x_label = _calculate_x_axis_extent(
-        ping_times, ping_min, ping_max, x_axis_units, meters_per_second, None
+    x_extent_min, x_extent_max, x_label = putils.calculate_x_axis_extent(
+        ping_times, ping_min, ping_max, x_axis_units,
+        meters_per_second=meters_per_second, echodata=None,
     )
     
-    # Calculate y-axis extent using helper function
-    y_extent_min, y_extent_max, y_label = _calculate_y_axis_extent(
+    # Calculate y-axis extent
+    y_extent_min, y_extent_max, y_label = putils.calculate_y_axis_extent(
         min_depth_shown, max_depth_shown, min_depth_index, max_depth_index, y_axis_units
     )
     
-    # Calculate plot dimensions and aspect ratio using helper function
-    extent, aspect_ratio, width_multiplier, height_multiplier = _calculate_plot_dimensions_and_aspect(
+    # Calculate plot dimensions and aspect ratio
+    extent, aspect_ratio, width_multiplier, height_multiplier = putils.calculate_plot_dimensions(
         x_extent_min, x_extent_max, y_extent_min, y_extent_max, y_to_x_aspect_ratio_override
     )
     
-    print(f"  X-axis ({x_axis_units}): {x_extent_min:.1f} to {x_extent_max:.1f}")
-    print(f"  Y-axis ({y_axis_units}): {y_extent_min:.1f} to {y_extent_max:.1f}")
-    print(f"  Depth Range: {min_depth_shown:.1f}m to {max_depth_shown:.1f}m")
-    print(f"  Aspect ratio (1:1 in specified units): {aspect_ratio:.3f}")
+    logger.info("  X-axis (%s): %.1f to %.1f", x_axis_units, x_extent_min, x_extent_max)
+    logger.info("  Y-axis (%s): %.1f to %.1f", y_axis_units, y_extent_min, y_extent_max)
+    logger.info("  Depth Range: %.1fm to %.1fm", min_depth_shown, max_depth_shown)
+    logger.info("  Aspect ratio (1:1 in specified units): %.3f", aspect_ratio)
 
     # Create figure with adjusted spacing for colorbar
     fig_width = 24 * width_multiplier
     fig_height = 24 * height_multiplier
 
-    print(f"Figure size: {fig_width} x {fig_height}")   
+    logger.info("Figure size: %s x %s", fig_width, fig_height)   
 
     # Calculate differences
     sv_diff_data = ds_Sv_calibrated['Sv'] - ds_Sv_baseline['Sv']
@@ -164,146 +169,4 @@ def sv_differences_echograms(ds_Sv_baseline, ds_Sv_calibrated, frequencies, max_
     plt.show()
 
 
-def _setup_depth_range_and_indices(dataset, min_depth, max_depth, ping_min, ping_max):
-    """
-    Helper function to set up depth range and calculate depth indices.
-    
-    Returns:
-        tuple: (min_depth, max_depth, min_depth_index, max_depth_index, min_depth_shown, max_depth_shown)
-    """
-    # Set default depth range if not provided - find actual data range
-    if min_depth is None or max_depth is None:
-        print("Auto-detecting depth range from data...")
-        auto_min_depth, auto_max_depth = utils.find_data_depth_range(
-            dataset, ping_min, ping_max, channel=0
-        )
-        if min_depth is None:
-            min_depth = auto_min_depth
-        if max_depth is None:
-            max_depth = auto_max_depth
-        print(f"Using depth range: {min_depth:.1f}m to {max_depth:.1f}m")
-
-    # Calculate depth indices
-    min_depth_index = utils.get_closest_index_for_depth(dataset, min_depth)
-    max_depth_index = utils.get_closest_index_for_depth(dataset, max_depth)
-
-    # Get actual depths from echo_range
-    actual_depths = dataset.echo_range.isel(channel=0, ping_time=0).values
-    
-    # Use actual depth range
-    max_depth_shown = actual_depths[min(max_depth_index, len(actual_depths)-1)]
-    min_depth_shown = actual_depths[min_depth_index]
-    
-    return min_depth, max_depth, min_depth_index, max_depth_index, min_depth_shown, max_depth_shown
-
-def _calculate_x_axis_extent(ping_times, ping_min, ping_max, x_axis_units, meters_per_second=None, echodata=None):
-    """
-    Helper function to calculate x-axis extent and labels based on units.
-    
-    Returns:
-        tuple: (x_extent_min, x_extent_max, x_label)
-    """
-    if x_axis_units == 'seconds':
-        start_time_seconds = (ping_times[ping_min] - ping_times[0]) / np.timedelta64(1, 's')
-        end_time_seconds = (ping_times[ping_max] - ping_times[0]) / np.timedelta64(1, 's')
-        x_extent_min = start_time_seconds
-        x_extent_max = end_time_seconds
-        x_label = 'Time (seconds from start)'
-    elif x_axis_units == 'pings':
-        x_extent_min = ping_min
-        x_extent_max = ping_max
-        x_label = 'Ping Number'
-    elif x_axis_units == 'meters':
-        start_time_seconds = (ping_times[ping_min] - ping_times[0]) / np.timedelta64(1, 's')
-        end_time_seconds = (ping_times[ping_max] - ping_times[0]) / np.timedelta64(1, 's')
-        
-        if meters_per_second is None:
-            if echodata is None:
-                raise ValueError("echodata parameter is required when meters_per_second is not provided")
-            print("Using GPS to calculate vessel speed...")
-            start_lat = echodata["Platform"]["latitude"][ping_min]
-            start_lon = echodata["Platform"]["longitude"][ping_min]
-            end_lat = echodata["Platform"]["latitude"][ping_max]
-            end_lon = echodata["Platform"]["longitude"][ping_max]
-            distance_meters = utils.haversine_distance(start_lat, start_lon, end_lat, end_lon)
-
-            duration_seconds = (end_time_seconds - start_time_seconds).astype('timedelta64[s]').astype(float)
-
-            if duration_seconds > 0:
-                meters_per_second = distance_meters / duration_seconds
-            else:
-                print("Warning: Zero duration detected, using default speed")
-                meters_per_second = 5.0  # Default 5 m/s for marine vessels
-            
-            print(f"GPS calculation details:")
-            print(f"  Start: lat={start_lat:.6f}, lon={start_lon:.6f}")
-            print(f"  End: lat={end_lat:.6f}, lon={end_lon:.6f}")
-            print(f"  Distance: ({distance_meters:.0f} m)")
-            print(f"  Duration: {duration_seconds:.1f} seconds ({duration_seconds/3600:.2f} hours)")
-            print(f"  Calculated speed: {meters_per_second:.2f} m/s ({meters_per_second*3.6:.1f} km/h)")
-        
-        x_extent_min = start_time_seconds * meters_per_second
-        x_extent_max = end_time_seconds * meters_per_second
-        x_label = 'Distance (meters)'
-    else:
-        raise ValueError(f"Invalid x_axis_units '{x_axis_units}'. Use 'pings', 'seconds', or 'meters'")
-    
-    return x_extent_min, x_extent_max, x_label
-
-def _calculate_y_axis_extent(min_depth_shown, max_depth_shown, min_depth_index, max_depth_index, y_axis_units, data_type=None):
-    """
-    Helper function to calculate y-axis extent and labels based on units.
-    
-    Returns:
-        tuple: (y_extent_min, y_extent_max, y_label)
-    """
-    if y_axis_units == 'meters':
-        y_extent_min = min_depth_shown
-        y_extent_max = max_depth_shown
-        y_label = 'Depth (m)'
-    elif y_axis_units == 'range_sample':
-        y_extent_min = min_depth_index
-        y_extent_max = max_depth_index
-        y_label = 'Range Sample Index'
-    elif y_axis_units == 'bins' and data_type == "MVBS":
-        y_extent_min = min_depth_index
-        y_extent_max = max_depth_index
-        y_label = 'MVBS Depth Bins'
-    else:
-        valid_y_units = ['meters', 'range_sample']
-        if data_type == "MVBS":
-            valid_y_units.append('bins')
-        raise ValueError(f"Invalid y_axis_units '{y_axis_units}'. Use {valid_y_units}")
-    
-    return y_extent_min, y_extent_max, y_label
-
-def _calculate_plot_dimensions_and_aspect(x_extent_min, x_extent_max, y_extent_min, y_extent_max, y_to_x_aspect_ratio_override=None):
-    """
-    Helper function to calculate plot dimensions and aspect ratio.
-    
-    Returns:
-        tuple: (extent, aspect_ratio, width_multiplier, height_multiplier)
-    """
-    # Set up extent for imshow plots - note that imshow expects [left, right, bottom, top]
-    extent = [x_extent_min, x_extent_max, y_extent_max, y_extent_min]
-    
-    # Calculate 1:1 aspect ratio in actual units
-    x_range = abs(x_extent_max - x_extent_min)
-    y_range = abs(y_extent_max - y_extent_min)
-    aspect_ratio = y_range / x_range
-    
-    # Override aspect ratio if specified
-    if y_to_x_aspect_ratio_override is not None:
-        aspect_ratio = (1 / y_to_x_aspect_ratio_override * (1 / aspect_ratio))
-
-    # Calculate figure size multipliers
-    width_multiplier = 1
-    height_multiplier = 1
-
-    if aspect_ratio < 1:
-        width_multiplier = min(10, 1 / aspect_ratio)
-    else:
-        height_multiplier = min(3, aspect_ratio)
-    
-    return extent, aspect_ratio, width_multiplier, height_multiplier
 

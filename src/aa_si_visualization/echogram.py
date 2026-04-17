@@ -10,9 +10,13 @@ lines.  The public API consists of:
 - :func:`plot_processed_echogram_main`: low-level orchestrator used by the above
 """
 
+import logging
 import numpy as np
 from aa_si_utils import utils
 from .echogram_handlers import create_handler
+from . import _plotting_utils as putils
+
+logger = logging.getLogger(__name__)
 
 
 def _setup_parameters(ds_Sv, frequency_nominal, max_depth, min_depth, ping_min, ping_max, 
@@ -106,7 +110,7 @@ def _prepare_ml_data(ds_Sv, params):
     if ml_data_variable not in ds_Sv:
         raise ValueError(f"ML data variable '{ml_data_variable}' not found in dataset")
     
-    print(f"Plotting ML data from variable: {ml_data_variable}")
+    logger.info("Plotting ML data from variable: %s", ml_data_variable)
     
     # Check if already gridded
     ml_data = ds_Sv[ml_data_variable]
@@ -118,7 +122,7 @@ def _prepare_ml_data(ds_Sv, params):
     )
     
     if is_already_gridded:
-        print("  Detected already-gridded single-channel data")
+        logger.info("Detected already-gridded single-channel data")
         sv_variable_name = ml_data_variable
         
         # Analyze cluster data
@@ -144,7 +148,7 @@ def _prepare_ml_data(ds_Sv, params):
     sv_variable_name = 'regridded_' + ml_data_variable
     ds_Sv[sv_variable_name] = regridded_data
     
-    print(f"  Regridded ML data shape: {regridded_data.shape}")
+    logger.debug("Regridded ML data shape: %s", regridded_data.shape)
     
     # Get grid coordinates from regridded data
     grid_coords = ml.get_grid_coordinates(ds_Sv, sv_variable_name)
@@ -170,7 +174,7 @@ def _prepare_ml_data(ds_Sv, params):
     else:
         freq_labels = [f"Feature {i}" for i in range(n_features)]
     
-    print(f"  ML data features: {freq_labels}")
+    logger.debug("ML data features: %s", freq_labels)
     
     # Determine color scale for ML data
     ml_vmin = params['ml_vmin']
@@ -228,7 +232,7 @@ def _analyze_cluster_data(cluster_data):
     valid_clusters = cluster_values[~np.isnan(cluster_values)]
     
     if len(valid_clusters) == 0:
-        print("WARNING: No valid cluster data found")
+        logger.warning("No valid cluster data found")
         return {
             'unique_labels': np.array([0]),
             'min_label': 0,
@@ -253,15 +257,14 @@ def _analyze_cluster_data(cluster_data):
         label_counts[int(label)] = int(count)
         label_percentages[int(label)] = percentage
     
-    # Print analysis
-    print(f"Cluster analysis:")
-    print(f"  Cluster range: {min_label} to {max_label}")
-    print(f"  Number of clusters: {num_clusters}")
+    logger.info("Cluster analysis:")
+    logger.info("  Cluster range: %d to %d", min_label, max_label)
+    logger.info("  Number of clusters: %d", num_clusters)
     for label in unique_labels:
         count = label_counts[int(label)]
         percentage = label_percentages[int(label)]
         label_name = 'Noise' if label == -1 else f'Cluster {int(label)}'
-        print(f"  {label_name}: {count:,} samples ({percentage:.1f}%)")
+        logger.info("  %s: %s samples (%.1f%%)", label_name, f"{count:,}", percentage)
     
     return {
         'unique_labels': unique_labels,
@@ -292,7 +295,7 @@ def _filter_nan_frequencies(ds_Sv, sv_variable_name, params, cluster_info):
             params['valid_channel_indices'] = list(range(params['n_channels']))
         return params
     
-    print("Checking for all-NaN frequencies...")
+    logger.info("Checking for all-NaN frequencies...")
     valid_channels = []
     valid_freq_labels = []
     
@@ -315,9 +318,9 @@ def _filter_nan_frequencies(ds_Sv, sv_variable_name, params, cluster_info):
                     valid_freq_labels.append(params['freq_labels'][freq_idx])
             else:
                 freq_label = params['freq_labels'][freq_idx] if params['freq_labels'] else f"Channel {freq_idx}"
-                print(f"  Skipping {freq_label}: all data is NaN")
+                logger.info("  Skipping %s: all data is NaN", freq_label)
         except Exception as e:
-            print(f"  Error checking frequency {freq_idx}: {e}")
+            logger.warning("  Error checking frequency %s: %s", freq_idx, e)
             valid_channels.append(freq_idx)  # Include on error to avoid breaking
             if params['freq_labels']:
                 valid_freq_labels.append(params['freq_labels'][freq_idx])
@@ -326,12 +329,12 @@ def _filter_nan_frequencies(ds_Sv, sv_variable_name, params, cluster_info):
         raise ValueError("All frequencies contain only NaN data - nothing to plot")
     
     if len(valid_channels) < params['n_channels']:
-        print(f"  Reduced from {params['n_channels']} to {len(valid_channels)} valid frequencies")
+        logger.info("  Reduced from %s to %s valid frequencies", params['n_channels'], len(valid_channels))
         params['n_channels'] = len(valid_channels)
         params['freq_labels'] = valid_freq_labels
         params['valid_channel_indices'] = valid_channels
     else:
-        print(f"  All {params['n_channels']} frequencies contain valid data")
+        logger.info("  All %s frequencies contain valid data", params['n_channels'])
         params['valid_channel_indices'] = list(range(params['n_channels']))
     
     return params
@@ -375,7 +378,7 @@ def _create_cluster_colormap(cluster_analysis, base_colors=None):
     else:
         cluster_colors = base_colors[:num_clusters]
     
-    print(f"Using {len(cluster_colors)} distinct colors for clusters")
+    logger.info("Using %s distinct colors for clusters", len(cluster_colors))
     
     # Create colormap based on whether noise points exist (DBSCAN vs K-means)
     no_data_color = "#2E2E2E"  # Gray for NaN/unassigned
@@ -432,7 +435,7 @@ def _calculate_ranges(handler, params, ds_Sv_original):
     
     # Depth range setup - auto-detect if needed
     if min_depth is None or max_depth is None:
-        print("Auto-detecting depth range from data...")
+        logger.info("Auto-detecting depth range from data...")
         depth_ref_dataset = ds_Sv_original if ds_Sv_original else handler.dataset
         
         # Check data structure type from handler
@@ -467,7 +470,7 @@ def _calculate_ranges(handler, params, ds_Sv_original):
                     else:
                         auto_min_depth, auto_max_depth = 0.0, 250.0  # Fallback
                 except Exception as e:
-                    print(f"Warning: Could not auto-detect depth range: {e}")
+                    logger.warning("Could not auto-detect depth range: %s", e)
                     auto_min_depth, auto_max_depth = 0.0, 250.0  # Fallback
         else:
             # Regular multi-channel data
@@ -479,7 +482,7 @@ def _calculate_ranges(handler, params, ds_Sv_original):
             min_depth = auto_min_depth
         if max_depth is None:
             max_depth = auto_max_depth
-        print(f"Using depth range: {min_depth:.1f}m to {max_depth:.1f}m")
+        logger.info("Using depth range: %.1fm to %.1fm", min_depth, max_depth)
     
     # Call handler methods to calculate indices and extents
     min_depth_idx, max_depth_idx = handler.calculate_depth_indices(min_depth, max_depth)
@@ -503,261 +506,7 @@ def _calculate_ranges(handler, params, ds_Sv_original):
     }
 
 
-def _calculate_x_axis_seconds(handler, ping_times, ping_range, is_mvbs):
-    """
-    Calculate x-axis extent in seconds from start.
-    
-    Args:
-        handler: EchogramDataHandler instance
-        ping_times: Array of ping times
-        ping_range: Tuple of (ping_min, ping_max)
-        is_mvbs: Boolean indicating MVBS structure
-        
-    Returns:
-        tuple: (x_min, x_max, x_label)
-    """
-    ping_min, ping_max = ping_range
-    
-    # Calculate seconds from start for both MVBS and regular Sv
-    start_time_seconds = (ping_times[ping_min] - ping_times[0]) / np.timedelta64(1, 's')
-    end_time_seconds = (ping_times[ping_max] - ping_times[0]) / np.timedelta64(1, 's')
-    
-    return (start_time_seconds, end_time_seconds, 'Time (seconds from start)')
 
-
-def _calculate_x_axis_pings(handler, ping_times, ping_range, is_mvbs):
-    """
-    Calculate x-axis extent in ping numbers or bin indices.
-    
-    Args:
-        handler: EchogramDataHandler instance
-        ping_times: Array of ping times
-        ping_range: Tuple of (ping_min, ping_max)
-        is_mvbs: Boolean indicating MVBS structure
-        
-    Returns:
-        tuple: (x_min, x_max, x_label)
-    """
-    ping_min, ping_max = ping_range
-    
-    if is_mvbs:
-        original_ping_min = handler.ping_min if hasattr(handler, 'ping_min') else ping_min
-        original_ping_max = handler.ping_max if hasattr(handler, 'ping_max') else ping_max
-        x_label = f'MVBS Bin (pings {original_ping_min} to {original_ping_max})'
-    else:
-        x_label = 'Ping Number'
-    
-    return (ping_min, ping_max, x_label)
-
-
-def _calculate_x_axis_bins(handler, ping_times, ping_range, is_mvbs):
-    """
-    Calculate x-axis extent in MVBS time bins.
-    
-    Args:
-        handler: EchogramDataHandler instance
-        ping_times: Array of ping times
-        ping_range: Tuple of (ping_min, ping_max)
-        is_mvbs: Boolean indicating MVBS structure
-        
-    Returns:
-        tuple: (x_min, x_max, x_label)
-        
-    Raises:
-        ValueError: If data is not MVBS structured
-    """
-    if not is_mvbs:
-        raise ValueError("x_axis_units='bins' is only valid for MVBS data")
-    
-    ping_min, ping_max = ping_range
-    return (ping_min, ping_max, 'MVBS Time Bins')
-
-
-def _calculate_x_axis_meters(handler, ping_times, ping_range, is_mvbs, meters_per_second, echodata):
-    """
-    Calculate x-axis extent in meters (distance traveled).
-    
-    Args:
-        handler: EchogramDataHandler instance
-        ping_times: Array of ping times
-        ping_range: Tuple of (ping_min, ping_max)
-        is_mvbs: Boolean indicating MVBS structure
-        meters_per_second: Speed in m/s (optional, will calculate from GPS if None)
-        echodata: Original echodata for GPS calculations (required if meters_per_second is None)
-        
-    Returns:
-        tuple: (x_min, x_max, x_label)
-        
-    Raises:
-        ValueError: If meters_per_second is None and echodata is not provided
-    """
-    ping_min, ping_max = ping_range
-    
-    # Calculate time in seconds first
-    start_time_seconds = (ping_times[ping_min] - ping_times[0]) / np.timedelta64(1, 's')
-    end_time_seconds = (ping_times[ping_max] - ping_times[0]) / np.timedelta64(1, 's')
-    
-    # Calculate or get meters_per_second
-    if meters_per_second is None:
-        if echodata is None:
-            raise ValueError("echodata parameter is required when meters_per_second is not provided and x_axis_units='meters'")
-        
-        original_ping_min = handler.ping_min if hasattr(handler, 'ping_min') else ping_min
-        original_ping_max = handler.ping_max if hasattr(handler, 'ping_max') else ping_max
-        
-        print("Using GPS calculation for meters_per_second...")
-        # TODO: Verify index alignment between ping_time and Platform lat/lon timestamps
-        start_lat = echodata["Platform"]["latitude"][original_ping_min]
-        start_lon = echodata["Platform"]["longitude"][original_ping_min]
-        end_lat = echodata["Platform"]["latitude"][original_ping_max]
-        end_lon = echodata["Platform"]["longitude"][original_ping_max]
-        
-        # Calculate distance using haversine formula
-        distance_meters = utils.haversine_distance(start_lat, start_lon, end_lat, end_lon)
-        
-        duration_seconds = end_time_seconds - start_time_seconds
-        
-        if duration_seconds > 0:
-            meters_per_second = distance_meters / duration_seconds
-        else:
-            print("Warning: Zero duration detected, using default speed")
-            meters_per_second = 5.0  # Default 5 m/s for marine vessels
-        
-        print(f"GPS calculation details:")
-        print(f"  Start: lat={start_lat:.6f}, lon={start_lon:.6f}")
-        print(f"  End: lat={end_lat:.6f}, lon={end_lon:.6f}")
-        print(f"  Distance: {distance_meters:.0f} m")
-        print(f"  Duration: {duration_seconds:.1f} seconds ({duration_seconds/3600:.2f} hours)")
-        print(f"  Calculated speed: {meters_per_second:.2f} m/s ({meters_per_second*3.6:.1f} km/h)")
-    
-    x_min = start_time_seconds * meters_per_second
-    x_max = end_time_seconds * meters_per_second
-    
-    return (x_min, x_max, 'Distance (meters)')
-
-
-def _calculate_x_axis_with_handler(handler, ping_times, ping_range, x_axis_units, meters_per_second, echodata):
-    """
-    Dispatcher function to calculate x-axis extent based on units.
-    Uses strategy pattern to delegate to appropriate calculator function.
-    
-    Args:
-        handler: EchogramDataHandler instance
-        ping_times: Array of ping times
-        ping_range: Tuple of (ping_min, ping_max)
-        x_axis_units: Units for x-axis ('seconds', 'pings', 'bins', 'meters')
-        meters_per_second: Speed for meters calculation (optional)
-        echodata: Original echodata for GPS calculation (optional)
-        
-    Returns:
-        tuple: (x_min, x_max, x_label)
-        
-    Raises:
-        ValueError: If x_axis_units is invalid for the data type
-    """
-    # Create lookup dict for calculators
-    calculators = {
-        'seconds': _calculate_x_axis_seconds,
-        'pings': _calculate_x_axis_pings,
-        'bins': _calculate_x_axis_bins,
-        'meters': _calculate_x_axis_meters
-    }
-    
-    # Validate unit
-    if x_axis_units not in calculators:
-        valid_units = ['seconds', 'pings', 'meters']
-        if handler.is_mvbs_structured():
-            valid_units.append('bins')
-        raise ValueError(f"Invalid x_axis_units '{x_axis_units}'. Valid options: {valid_units}")
-    
-    # Get handler state
-    is_mvbs = handler.is_mvbs_structured()
-    
-    # Call appropriate calculator
-    calculator = calculators[x_axis_units]
-    
-    if x_axis_units == 'meters':
-        return calculator(handler, ping_times, ping_range, is_mvbs, meters_per_second, echodata)
-    else:
-        return calculator(handler, ping_times, ping_range, is_mvbs)
-
-
-def _calculate_y_axis_extent_local(min_depth_shown, max_depth_shown, min_depth_index, max_depth_index, y_axis_units, data_type=None):
-    """Calculate y-axis extent and label string based on the requested units.
-
-    Args:
-        min_depth_shown: Minimum depth value in meters.
-        max_depth_shown: Maximum depth value in meters.
-        min_depth_index: Minimum depth index.
-        max_depth_index: Maximum depth index
-        y_axis_units: Units for y-axis ('meters', 'range_sample', 'bins')
-        data_type: Type of data (for validation, optional)
-        
-    Returns:
-        tuple: (y_extent_min, y_extent_max, y_label)
-        
-    Raises:
-        ValueError: If y_axis_units is invalid for the data type
-    """
-    if y_axis_units == 'meters':
-        y_extent_min = min_depth_shown
-        y_extent_max = max_depth_shown
-        y_label = 'Depth (m)'
-    elif y_axis_units == 'range_sample':
-        y_extent_min = min_depth_index
-        y_extent_max = max_depth_index
-        y_label = 'Range Sample Index'
-    elif y_axis_units == 'bins':
-        # Allow 'bins' for MVBS and Cluster-MVBS data
-        if data_type and data_type not in ['MVBS', 'ML-MVBS', 'Cluster-MVBS']:
-            raise ValueError("y_axis_units='bins' is only valid for MVBS data")
-        y_extent_min = min_depth_index
-        y_extent_max = max_depth_index
-        y_label = 'MVBS Depth Bins'
-    else:
-        valid_y_units = ['meters', 'range_sample']
-        if data_type and data_type in ['MVBS', 'ML-MVBS', 'Cluster-MVBS']:
-            valid_y_units.append('bins')
-        raise ValueError(f"Invalid y_axis_units '{y_axis_units}'. Use {valid_y_units}")
-    
-    return y_extent_min, y_extent_max, y_label
-
-
-def _calculate_plot_dimensions_and_aspect_local(x_extent_min, x_extent_max, y_extent_min, y_extent_max, y_to_x_aspect_ratio_override=None):
-    """Calculate plot extent, aspect ratio, and figure-size multipliers.
-
-    Args:
-        x_extent_min: Minimum x-axis extent
-        x_extent_max: Maximum x-axis extent
-        y_extent_min: Minimum y-axis extent
-        y_extent_max: Maximum y-axis extent
-        y_to_x_aspect_ratio_override: Optional override for aspect ratio
-        
-    Returns:
-        tuple: (extent, aspect_ratio, width_multiplier, height_multiplier)
-    """
-    # imshow expects [left, right, bottom, top]
-    extent = [x_extent_min, x_extent_max, y_extent_max, y_extent_min]
-    
-    # Calculate 1:1 aspect ratio in actual units
-    x_range = abs(x_extent_max - x_extent_min)
-    y_range = abs(y_extent_max - y_extent_min)
-    aspect_ratio = y_range / x_range
-    
-    # Override aspect ratio if specified
-    if y_to_x_aspect_ratio_override is not None:
-        aspect_ratio = (1 / y_to_x_aspect_ratio_override * (1 / aspect_ratio))
-
-    # Calculate figure size multipliers
-    width_multiplier = 1
-    height_multiplier = 1
-
-    if aspect_ratio < 1:
-        width_multiplier = min(10, 1 / aspect_ratio)
-    else:
-        height_multiplier = min(3, aspect_ratio)
-    
-    return extent, aspect_ratio, width_multiplier, height_multiplier
 
 
 def _calculate_axes(handler, ranges, params, echodata):
@@ -776,49 +525,49 @@ def _calculate_axes(handler, ranges, params, echodata):
     # Get ping times from handler
     ping_times = handler.get_ping_times()
     
-    # Calculate x-axis extent using handler-aware calculator
-    x_min, x_max, x_label = _calculate_x_axis_with_handler(
-        handler, 
-        ping_times, 
-        (ranges['ping']['min'], ranges['ping']['max']),
+    # Calculate x-axis extent
+    x_min, x_max, x_label = putils.calculate_x_axis_extent(
+        ping_times,
+        ranges['ping']['min'], ranges['ping']['max'],
         params['x_axis_units'],
-        params['meters_per_second'],
-        echodata
+        meters_per_second=params['meters_per_second'],
+        echodata=echodata,
+        handler=handler,
     )
     
-    # Calculate y-axis extent using local helper
-    y_min, y_max, y_label = _calculate_y_axis_extent_local(
+    # Calculate y-axis extent
+    data_type = handler.detect_structure()['type']
+    y_min, y_max, y_label = putils.calculate_y_axis_extent(
         ranges['depth']['min_shown'],
         ranges['depth']['max_shown'],
         ranges['depth']['min_index'],
         ranges['depth']['max_index'],
         params['y_axis_units'],
-        handler.detect_structure()['type']  # Pass data type for validation
+        data_type,
     )
     
-    # Calculate plot dimensions and aspect ratio using local helper
-    extent, aspect_ratio, width_mult, height_mult = _calculate_plot_dimensions_and_aspect_local(
+    # Calculate plot dimensions and aspect ratio
+    extent, aspect_ratio, width_mult, height_mult = putils.calculate_plot_dimensions(
         x_min, x_max, y_min, y_max, params['y_to_x_aspect_ratio_override']
     )
     
-    # Print diagnostics
-    data_type = handler.detect_structure()['type']
-    print(f"{data_type} Echogram dimensions:")
+    # Log diagnostics
+    logger.info("%s Echogram dimensions:", data_type)
     
     if handler.is_mvbs_structured():
-        print(f"  Original ping range requested: {params['ping_min']} to {params['ping_max']}")
-        print(f"  MVBS ping indices used: {ranges['ping']['min']} to {ranges['ping']['max']}")
-        print(f"  MVBS time range: {ping_times[ranges['ping']['min']]} to {ping_times[ranges['ping']['max']]}")
-        print(f"  MVBS depth range: {ranges['depth']['min_shown']} to {ranges['depth']['max_shown']}")
+        logger.info("  Original ping range requested: %s to %s", params['ping_min'], params['ping_max'])
+        logger.info("  MVBS ping indices used: %s to %s", ranges['ping']['min'], ranges['ping']['max'])
+        logger.info("  MVBS time range: %s to %s", ping_times[ranges['ping']['min']], ping_times[ranges['ping']['max']])
+        logger.info("  MVBS depth range: %s to %s", ranges['depth']['min_shown'], ranges['depth']['max_shown'])
     elif data_type.startswith("ML"):
-        print(f"  ML data regridded from flattened format")
-        print(f"  Ping range: {ranges['ping']['min']} to {ranges['ping']['max']}")
+        logger.info("  ML data regridded from flattened format")
+        logger.info("  Ping range: %s to %s", ranges['ping']['min'], ranges['ping']['max'])
     
-    print(f"  X-axis ({params['x_axis_units']}): {x_min:.1f} to {x_max:.1f}")
-    print(f"  Y-axis ({params['y_axis_units']}): {y_min:.1f} to {y_max:.1f}")
-    print(f"  Features: {params['n_channels']}")
-    print(f"  Depth Range: {ranges['depth']['min_shown']:.1f}m to {ranges['depth']['max_shown']:.1f}m")
-    print(f"  Aspect ratio (1:1 in specified units): {aspect_ratio:.3f}")
+    logger.info("  X-axis (%s): %.1f to %.1f", params['x_axis_units'], x_min, x_max)
+    logger.info("  Y-axis (%s): %.1f to %.1f", params['y_axis_units'], y_min, y_max)
+    logger.info("  Features: %s", params['n_channels'])
+    logger.info("  Depth Range: %.1fm to %.1fm", ranges['depth']['min_shown'], ranges['depth']['max_shown'])
+    logger.info("  Aspect ratio (1:1 in specified units): %.3f", aspect_ratio)
     
     # Return consolidated axis configuration
     return {
@@ -854,7 +603,7 @@ def _add_overlay_line(ax, ds, line_spec, ping_min, ping_max, axes_config):
     var_name = line_spec['var']
     
     if var_name not in ds:
-        print(f"WARNING: Overlay variable '{var_name}' not found in dataset")
+        logger.warning("Overlay variable '%s' not found in dataset", var_name)
         return
     
     # Get variable data and slice to plot window
@@ -874,7 +623,7 @@ def _add_overlay_line(ax, ds, line_spec, ping_min, ping_max, axes_config):
     y_coords = y_coords[valid_mask]
     
     if len(x_coords) == 0:
-        print(f"WARNING: No valid data for overlay variable '{var_name}' in plot range")
+        logger.warning("No valid data for overlay variable '%s' in plot range", var_name)
         return
     
     # Get style from line_spec
@@ -889,188 +638,192 @@ def _add_overlay_line(ax, ds, line_spec, ping_min, ping_max, axes_config):
     ax.plot(x_coords, y_coords, **plot_kwargs)
 
 
-def _create_plot(handler, axes_config, ranges, params, ml_info=None, cluster_info=None, cluster_colors=None, overlay_lines=None):
-    """
-    Create the final echogram plot using matplotlib.
-    Handles both multi-frequency continuous data and single-channel categorical cluster data.
-    
+def _create_cluster_plot(fig, handler, axes_config, ranges, cluster_info, cluster_colors):
+    """Render a single-panel cluster classification echogram.
+
     Args:
-        handler: EchogramDataHandler instance
-        axes_config: Axis configuration from _calculate_axes()
-        ranges: Range dict from _calculate_ranges()
-        params: Parameter dict from _setup_parameters()
-        ml_info: ML info dict from _prepare_ml_data() (None for regular Sv)
-        cluster_info: Cluster info dict from _prepare_ml_data() (None for non-cluster data)
+        fig: matplotlib Figure.
+        handler: EchogramDataHandler instance.
+        axes_config: Axis configuration from _calculate_axes().
+        ranges: Range dict from _calculate_ranges().
+        cluster_info: Cluster info dict from _prepare_ml_data().
+        cluster_colors: Optional list of hex color strings.
+
+    Returns:
+        list: Axes objects created (length 1).
     """
     import matplotlib.pyplot as plt
-    
-    # Cluster mode detection
-    is_cluster_mode = (cluster_info is not None)
-    
-    # Set black background style and create figure
-    plt.style.use('dark_background')
-    
-    if is_cluster_mode:
-        # Single panel for cluster data
-        fig_width = 24 * axes_config['width_multiplier']
-        fig_height = 12 * axes_config['height_multiplier']
-    else:
-        # Multi-panel for frequency data
-        fig_width = 24 * axes_config['width_multiplier']
-        fig_height = 12 * params['n_channels'] * axes_config['height_multiplier']
-    
-    fig = plt.figure(figsize=(fig_width, fig_height))
-    fig.patch.set_facecolor('black')
-    
-    # Determine data type for title
+
+    logger.info("Creating cluster plot...")
+    ax = plt.subplot(1, 1, 1)
+    ax.set_facecolor('black')
+
+    ping_range = (ranges['ping']['min'], ranges['ping']['max'])
+    depth_range = (ranges['depth']['min_index'], ranges['depth']['max_index'])
+    cluster_data = handler.slice_data_for_frequency(0, ping_range, depth_range)
+
+    cmap, norm, tick_positions, tick_labels = _create_cluster_colormap(
+        cluster_info, base_colors=cluster_colors
+    )
+
+    im = ax.imshow(
+        cluster_data.T,
+        aspect=axes_config['aspect_ratio'],
+        cmap=cmap,
+        norm=norm,
+        extent=axes_config['extent'],
+        interpolation='nearest',
+    )
+
+    ax.set_title('Cluster Analysis - Multi-frequency Classification',
+                 fontsize=14, fontweight='bold', color='white', pad=20)
+    ax.set_ylabel(axes_config['y']['label'], fontsize=12, color='white')
+    ax.set_xlabel(axes_config['x']['label'], fontsize=10, color='white')
+    ax.tick_params(colors='white')
+
+    plt.tight_layout(pad=3.0)
+    fig.subplots_adjust(right=0.85, top=0.92)
+
+    cbar_ax = fig.add_axes([0.87, 0.15, 0.02, 0.7])
+    cbar_ax.set_facecolor('black')
+    cbar = fig.colorbar(im, cax=cbar_ax)
+    cbar.set_label('Cluster ID', fontsize=12, color='white')
+    cbar.ax.tick_params(colors='white')
+    cbar.set_ticks(tick_positions)
+    cbar.set_ticklabels(tick_labels)
+
+    plt.suptitle('Cluster Analysis - Multi-frequency Acoustic Backscatter Classification',
+                 fontsize=16, fontweight='bold', color='white', y=0.96)
+
+    return [ax]
+
+
+def _create_multi_frequency_plot(fig, handler, axes_config, ranges, params):
+    """Render a multi-panel continuous-colormap echogram (one row per channel).
+
+    Args:
+        fig: matplotlib Figure.
+        handler: EchogramDataHandler instance.
+        axes_config: Axis configuration from _calculate_axes().
+        ranges: Range dict from _calculate_ranges().
+        params: Parameter dict from _setup_parameters().
+
+    Returns:
+        list: Axes objects created (one per frequency).
+    """
+    import matplotlib.pyplot as plt
+
+    logger.info("Creating multi-frequency plot...")
     data_type = handler.detect_structure()['type']
 
-    axes_list = [] 
+    sv_image = None
+    freq_labels = params['freq_labels']
+    n_channels = params['n_channels']
+    axes_list = []
 
-    if is_cluster_mode:
-        # Cluster mode
-        print("Creating cluster plot...")
-        
-        ax = plt.subplot(1, 1, 1)
-        ax.set_facecolor('black')
+    for plot_idx, freq_idx in enumerate(
+        params.get('valid_channel_indices', range(n_channels))
+    ):
+        ax = plt.subplot(n_channels, 1, plot_idx + 1)
         axes_list.append(ax)
-        # Get cluster data slice
+        ax.set_facecolor('black')
+
+        freq_label = freq_labels[plot_idx] if freq_labels else f"Feature {plot_idx}"
+
         ping_range = (ranges['ping']['min'], ranges['ping']['max'])
         depth_range = (ranges['depth']['min_index'], ranges['depth']['max_index'])
-        cluster_data = handler.slice_data_for_frequency(0, ping_range, depth_range)
-        
-        # Create cluster colormap
-        cmap, norm, tick_positions, tick_labels = _create_cluster_colormap(cluster_info, base_colors=cluster_colors)
-        
+        sv_data = handler.slice_data_for_frequency(freq_idx, ping_range, depth_range)
+
         im = ax.imshow(
-            cluster_data.T,  # Transpose to have range on y-axis
+            sv_data.T,
             aspect=axes_config['aspect_ratio'],
-            cmap=cmap,
-            norm=norm,
+            vmin=params['sv_vmin'],
+            vmax=params['sv_vmax'],
+            cmap=params['sv_cmap'],
             extent=axes_config['extent'],
-            interpolation='nearest'  # Sharp boundaries for clusters
         )
-        
-        # Set title and labels
-        title = f'Cluster Analysis - Multi-frequency Classification'
-        ax.set_title(title, fontsize=14, fontweight='bold', color='white', pad=20)
-        ax.set_ylabel(axes_config['y']['label'], fontsize=12, color='white')
-        ax.set_xlabel(axes_config['x']['label'], fontsize=10, color='white')
+
+        if plot_idx == 0:
+            sv_image = im
+
+        title_suffix = "ML Data" if data_type.startswith("ML") else f'{data_type} Echogram'
+        ax.set_title(f'{freq_label} - {title_suffix}',
+                     fontsize=12, fontweight='bold', color='white', pad=20)
+        ax.set_ylabel(axes_config['y']['label'], fontsize=10, color='white')
         ax.tick_params(colors='white')
-        
-        # Adjust layout with space for vertical colorbar
-        plt.tight_layout(pad=3.0)
-        fig.subplots_adjust(right=0.85, top=0.92)
-        
-        # Create vertical colorbar on right side
-        cbar_ax = fig.add_axes([0.87, 0.15, 0.02, 0.7])
-        cbar_ax.set_facecolor('black')
-        cbar = fig.colorbar(im, cax=cbar_ax)
-        cbar.set_label('Cluster ID', fontsize=12, color='white')
-        cbar.ax.tick_params(colors='white')
-        cbar.set_ticks(tick_positions)
-        cbar.set_ticklabels(tick_labels)
-        
-        plt.suptitle('Cluster Analysis - Multi-frequency Acoustic Backscatter Classification',
-                    fontsize=16, fontweight='bold', color='white', y=0.96)
-        
+
+        if plot_idx == n_channels - 1:
+            ax.set_xlabel(axes_config['x']['label'], fontsize=10, color='white')
+
+    plt.tight_layout(pad=3.0, h_pad=5.0, w_pad=2.0)
+    fig.subplots_adjust(bottom=0.12, top=0.92)
+
+    cbar_ax = fig.add_axes([0.15, 0.05, 0.7, 0.02])
+    cbar_ax.set_facecolor('black')
+    cbar = fig.colorbar(sv_image, cax=cbar_ax, orientation='horizontal')
+
+    if data_type.startswith("ML"):
+        cbar_label = 'ML Feature Value'
+        plot_title = 'ML Data Echogram'
     else:
-        # multi frequency mode: Multiple panels with continuous colormap
-        print("Creating multi-frequency plot...")
-        
-        # Store the image for shared colorbar
-        sv_image = None
-        
-        # Get frequency labels
-        freq_labels = params['freq_labels']
-        n_channels = params['n_channels']
+        cbar_label = 'Sv (dB)'
+        plot_title = f'{data_type} Echogram - {"Gridded " if data_type == "MVBS" else ""}Calibrated Data'
 
-        # Loop through frequencies and create subplots
-        for plot_idx, freq_idx in enumerate(params.get('valid_channel_indices', range(params['n_channels']))):
-            # Set black background for each subplot
-            ax = plt.subplot(n_channels, 1, plot_idx + 1)
-            axes_list.append(ax)
-            ax.set_facecolor('black')
-            
-            # Get frequency label
-            freq_label = freq_labels[plot_idx] if freq_labels else f"Feature {plot_idx}"
-            
-            # Get data slice from handler
-            ping_range = (ranges['ping']['min'], ranges['ping']['max'])
-            depth_range = (ranges['depth']['min_index'], ranges['depth']['max_index'])
-            sv_data = handler.slice_data_for_frequency(freq_idx, ping_range, depth_range)
-    
-            # Create the echogram using imshow
-            im = ax.imshow(
-                sv_data.T,  # Transpose to have range on y-axis
-                aspect=axes_config['aspect_ratio'],
-                vmin=params['sv_vmin'],
-                vmax=params['sv_vmax'],
-                cmap=params['sv_cmap'],
-                extent=axes_config['extent']
-            )
-            
-            # Store first image for shared colorbar
-            if freq_idx == 0:
-                sv_image = im
-            
-            # Customize the plot with white text for black background
-            if data_type.startswith("ML"):
-                title_suffix = "ML Data"
-            else:
-                title_suffix = f'{data_type} Echogram'
-            
-            ax.set_title(f'{freq_label} - {title_suffix}', 
-                        fontsize=12, fontweight='bold', color='white', pad=20)
-            ax.set_ylabel(axes_config['y']['label'], fontsize=10, color='white')
-            ax.tick_params(colors='white')
-            
-            # Set x-label only on the bottom subplot
-            if freq_idx == n_channels - 1:
-                ax.set_xlabel(axes_config['x']['label'], fontsize=10, color='white')
-        
+    cbar.set_label(cbar_label, fontsize=10, color='white')
+    cbar.ax.tick_params(colors='white')
+    plt.suptitle(plot_title, fontsize=16, fontweight='bold', y=0.96, color='white')
 
-                    
-        # Adjust layout with more spacing for titles and between subplots
-        plt.tight_layout(pad=3.0, h_pad=5.0, w_pad=2.0)
-        
-        # Create space for colorbars at the bottom and more space below title
-        fig.subplots_adjust(bottom=0.12, top=0.92)
-        
-        # Add shared colorbar at the bottom
-        cbar_ax = fig.add_axes([0.15, 0.05, 0.7, 0.02])  # [left, bottom, width, height]
-        cbar_ax.set_facecolor('black')
-        cbar = fig.colorbar(sv_image, cax=cbar_ax, orientation='horizontal')
-        
-        # Set colorbar label based on data type
-        if data_type.startswith("ML"):
-            cbar_label = 'ML Feature Value'
-        else:
-            cbar_label = 'Sv (dB)'
-        
-        cbar.set_label(cbar_label, fontsize=10, color='white')
-        cbar.ax.tick_params(colors='white')
-        
-        # Set plot title based on data type
-        if data_type.startswith("ML"):
-            plot_title = 'ML Data Echogram'
-        else:
-            plot_title = f'{data_type} Echogram - {"Gridded " if data_type == "MVBS" else ""}Calibrated Data'
-        
-        plt.suptitle(plot_title, fontsize=16, fontweight='bold', y=0.96, color='white')
-    
+    return axes_list
+
+
+def _create_plot(handler, axes_config, ranges, params, ml_info=None, cluster_info=None, cluster_colors=None, overlay_lines=None):
+    """Create the final echogram plot using matplotlib.
+
+    Dispatches to :func:`_create_cluster_plot` for cluster data or
+    :func:`_create_multi_frequency_plot` for continuous Sv / ML data.
+
+    Args:
+        handler: EchogramDataHandler instance.
+        axes_config: Axis configuration from _calculate_axes().
+        ranges: Range dict from _calculate_ranges().
+        params: Parameter dict from _setup_parameters().
+        ml_info: ML info dict from _prepare_ml_data() (None for regular Sv).
+        cluster_info: Cluster info dict (None for non-cluster data).
+        cluster_colors: Optional list of hex color strings.
+        overlay_lines: Optional list of line overlay specifications.
+    """
+    import matplotlib.pyplot as plt
+
+    is_cluster_mode = (cluster_info is not None)
+
+    plt.style.use('dark_background')
+
+    fig_width = 24 * axes_config['width_multiplier']
+    if is_cluster_mode:
+        fig_height = 12 * axes_config['height_multiplier']
+    else:
+        fig_height = 12 * params['n_channels'] * axes_config['height_multiplier']
+
+    fig = plt.figure(figsize=(fig_width, fig_height))
+    fig.patch.set_facecolor('black')
+
+    if is_cluster_mode:
+        axes_list = _create_cluster_plot(
+            fig, handler, axes_config, ranges, cluster_info, cluster_colors
+        )
+    else:
+        axes_list = _create_multi_frequency_plot(
+            fig, handler, axes_config, ranges, params
+        )
+
     if overlay_lines is not None:
         ping_min = ranges['ping']['min']
         ping_max = ranges['ping']['max']
-        
         for ax in axes_list:
             for line_spec in overlay_lines:
                 _add_overlay_line(ax, handler.dataset, line_spec, ping_min, ping_max, axes_config)
 
-
     plt.show()
-    
-    # Reset style to default after plotting
     plt.style.use('default')
 
 
@@ -1141,44 +894,44 @@ def plot_processed_echogram_main(ds_Sv, frequency_nominal, max_depth=None, min_d
         ...                             ml_specific_data_name='normalized')
     """
     
-    print("Setting up parameters...")
+    logger.info("Setting up parameters...")
     params = _setup_parameters(
         ds_Sv, frequency_nominal, max_depth, min_depth, ping_min, ping_max,
         sv_vmin, sv_vmax, sv_cmap, ds_Sv_original, use_corrected_Sv,
         x_axis_units, y_axis_units, meters_per_second, y_to_x_aspect_ratio_override,
         ml_vmin, ml_vmax, echodata, ml_dataset_name, ml_specific_data_name
     )
-    print(f"  Ping range: {params['ping_min']} to {params['ping_max']}")
+    logger.info("  Ping range: %s to %s", params['ping_min'], params['ping_max'])
     if params['ml_data_variable']:
-        print(f"  ML variable: {params['ml_data_variable']}")
+        logger.info("  ML variable: %s", params['ml_data_variable'])
     
-    print("Preparing data...")
+    logger.info("Preparing data...")
     ds_Sv_plot, ml_info, sv_variable_name, cluster_info = _prepare_ml_data(ds_Sv, params)
     if cluster_info:
-        print(f"  Cluster data detected: {cluster_info['num_clusters']} clusters")
+        logger.info("  Cluster data detected: %s clusters", cluster_info['num_clusters'])
     elif ml_info:
-        print(f"  ML data regridded: {ml_info['n_features']} features")
-        print(f"  Color scale: {params['sv_vmin']:.2f} to {params['sv_vmax']:.2f}")
+        logger.info("  ML data regridded: %s features", ml_info['n_features'])
+        logger.info("  Color scale: %.2f to %.2f", params['sv_vmin'], params['sv_vmax'])
     else:
-        print(f"  Using variable: {sv_variable_name}")
+        logger.info("  Using variable: %s", sv_variable_name)
     
     params = _filter_nan_frequencies(ds_Sv_plot, sv_variable_name, params, cluster_info)
 
-    print("Creating data handler...")
+    logger.info("Creating data handler...")
     handler = create_handler(ds_Sv_plot, sv_variable_name, params['ml_data_variable'])
     data_type = handler.detect_structure()['type']
-    print(f"  Handler created: {handler.__class__.__name__}")
-    print(f"  Data type: {data_type}")
+    logger.info("  Handler created: %s", handler.__class__.__name__)
+    logger.info("  Data type: %s", data_type)
     
-    print("Calculating ranges...")
+    logger.info("Calculating ranges...")
     ranges = _calculate_ranges(handler, params, ds_Sv_original)
-    print(f"  Depth range: {ranges['depth']['min_shown']:.1f}m to {ranges['depth']['max_shown']:.1f}m")
-    print(f"  Ping range: {ranges['ping']['min']} to {ranges['ping']['max']}")
+    logger.info("  Depth range: %.1fm to %.1fm", ranges['depth']['min_shown'], ranges['depth']['max_shown'])
+    logger.info("  Ping range: %s to %s", ranges['ping']['min'], ranges['ping']['max'])
     
-    print("Calculating axes...")
+    logger.info("Calculating axes...")
     axes_config = _calculate_axes(handler, ranges, params, echodata)
     
-    print("Creating plot...")
+    logger.info("Creating plot...")
     _create_plot(handler, axes_config, ranges, params, ml_info, cluster_info, cluster_colors=cluster_colors, overlay_lines=overlay_lines)
 
 
@@ -1252,12 +1005,12 @@ def plot_cluster_echogram(ds_ml_ready, dataset_name, specific_data_name,
     grid_result_name = f"{full_result_name}_grid"
     
     if gridded_data is not None:
-        print("Using provided gridded cluster data")
+        logger.info("Using provided gridded cluster data")
         ds_ml_ready[grid_result_name] = gridded_data
     
     if grid_result_name not in ds_ml_ready:
         if full_result_name in ds_ml_ready:
-            print(f"Regridding {full_result_name} for visualization...")
+            logger.info("Regridding %s for visualization...", full_result_name)
             from aa_si_ml import ml
             gridded_results = ml.extract_ml_data_gridded(
                 ds_ml_ready, 
@@ -1266,11 +1019,11 @@ def plot_cluster_echogram(ds_ml_ready, dataset_name, specific_data_name,
                 fill_value=np.nan,
                 store_in_dataset=True  # This creates the _grid variable
             )
-            print(f"  Regridded to shape: {gridded_results.shape}")
+            logger.info("  Regridded to shape: %s", gridded_results.shape)
         else:
             raise ValueError(f"Neither {grid_result_name} nor {full_result_name} found in dataset")
     else:
-        print(f"Using existing gridded results: {grid_result_name}")
+        logger.info("Using existing gridded results: %s", grid_result_name)
     
     # Print data statistics
     cluster_data_var = ds_ml_ready[grid_result_name]
@@ -1278,24 +1031,20 @@ def plot_cluster_echogram(ds_ml_ready, dataset_name, specific_data_name,
     nan_count = np.sum(np.isnan(cluster_data_var.values))
     valid_count = total_values - nan_count
     
-    print(f"Gridded cluster data analysis:")
-    print(f"  Total values: {total_values:,}")
-    print(f"  NaN values: {nan_count:,} ({nan_count/total_values*100:.1f}%)")
-    print(f"  Valid values: {valid_count:,} ({valid_count/total_values*100:.1f}%)")
+    logger.info("Gridded cluster data analysis:")
+    logger.info("  Total values: %s", f"{total_values:,}")
+    logger.info("  NaN values: %s (%.1f%%)", f"{nan_count:,}", nan_count/total_values*100)
+    logger.info("  Valid values: %s (%.1f%%)", f"{valid_count:,}", valid_count/total_values*100)
     
     # Detect MVBS structure
-    is_mvbs_derived = False
-    if 'echo_range' in ds_ml_ready.coords:
-        echo_range_dims = ds_ml_ready['echo_range'].dims
-        # MVBS has 1D echo_range, regular Sv has 2D or 3D
-        is_mvbs_derived = len(echo_range_dims) == 1
+    is_mvbs_derived = putils.is_mvbs_dataset(ds_ml_ready)
     
     if is_mvbs_derived:
-        print("Detected MVBS-derived cluster data")
+        logger.info("Detected MVBS-derived cluster data")
         if ds_Sv_original is None:
-            print("WARNING: ds_Sv_original not provided for MVBS data. Ping range conversion may not be accurate.")
+            logger.warning("ds_Sv_original not provided for MVBS data. Ping range conversion may not be accurate.")
     else:
-        print("Detected regular Sv-derived cluster data")
+        logger.info("Detected regular Sv-derived cluster data")
     
     return plot_processed_echogram_main(
         ds_Sv=ds_ml_ready,
@@ -1389,11 +1138,7 @@ def plot_sv_echogram(ds_Sv, ds_Sv_original=None, frequency_nominal=None, min_dep
         ...                  x_axis_units='bins', y_axis_units='bins')
     """
     # Detect MVBS format
-    is_mvbs = False
-    if 'echo_range' in ds_Sv.coords:
-        echo_range_dims = ds_Sv['echo_range'].dims
-        # MVBS has 1D echo_range, regular Sv has 2D or 3D
-        is_mvbs = len(echo_range_dims) == 1
+    is_mvbs = putils.is_mvbs_dataset(ds_Sv)
     
     # Validation for MVBS data
     if is_mvbs:
@@ -1403,8 +1148,8 @@ def plot_sv_echogram(ds_Sv, ds_Sv_original=None, frequency_nominal=None, min_dep
                 "for MVBS plotting to properly convert ping indices. Please provide the "
                 "original Sv dataset."
             )
-        print("Detected MVBS data format")
-        print("  Using ds_Sv_original for ping range conversion")
+        logger.info("Detected MVBS data format")
+        logger.info("  Using ds_Sv_original for ping range conversion")
         
         # Validate axis units for MVBS
         if x_axis_units not in ['seconds', 'pings', 'bins', 'meters']:
@@ -1414,7 +1159,7 @@ def plot_sv_echogram(ds_Sv, ds_Sv_original=None, frequency_nominal=None, min_dep
             raise ValueError(f"Invalid y_axis_units '{y_axis_units}' for MVBS data. "
                            f"Valid options: ['meters', 'range_sample', 'bins']")
     else:
-        print("Detected regular Sv data format")
+        logger.info("Detected regular Sv data format")
         
         # Validation for regular Sv - bins not allowed
         if x_axis_units == 'bins':
@@ -1424,7 +1169,7 @@ def plot_sv_echogram(ds_Sv, ds_Sv_original=None, frequency_nominal=None, min_dep
         
         # ds_Sv_original not needed for regular Sv, but warn if provided
         if ds_Sv_original is not None:
-            print("  Note: ds_Sv_original provided but not needed for regular Sv data")
+            logger.info("  Note: ds_Sv_original provided but not needed for regular Sv data")
     
     # Auto-detect frequency_nominal
     if frequency_nominal is None:
@@ -1551,11 +1296,7 @@ def plot_flattened_data_echogram(ds_ml, ml_dataset_name, ds_Sv_original=None, fr
         raise ValueError(f"ML variable '{ml_var}' not found in dataset. Available: {list(ds_ml.data_vars)}")
     
     # Detect MVBS format
-    is_mvbs = False
-    if 'echo_range' in ds_ml.coords:
-        echo_range_dims = ds_ml['echo_range'].dims
-        # MVBS has 1D echo_range, regular Sv has 2D or 3D
-        is_mvbs = len(echo_range_dims) == 1
+    is_mvbs = putils.is_mvbs_dataset(ds_ml)
     
     if is_mvbs:
         if ds_Sv_original is None:
@@ -1564,9 +1305,9 @@ def plot_flattened_data_echogram(ds_ml, ml_dataset_name, ds_Sv_original=None, fr
                 "for MVBS-based ML plotting to properly convert ping indices. Please provide the "
                 "original Sv dataset."
             )
-        print(f"Plotting ML echogram from MVBS structure...")
-        print(f"  ML variable: {ml_var}")
-        print(f"  Using original Sv dataset for ping range conversion")
+        logger.info("Plotting ML echogram from MVBS structure...")
+        logger.info("  ML variable: %s", ml_var)
+        logger.info("  Using original Sv dataset for ping range conversion")
         
         if x_axis_units not in ['seconds', 'pings', 'bins', 'meters']:
             raise ValueError(f"Invalid x_axis_units '{x_axis_units}' for MVBS-derived ML data. "
@@ -1575,8 +1316,8 @@ def plot_flattened_data_echogram(ds_ml, ml_dataset_name, ds_Sv_original=None, fr
             raise ValueError(f"Invalid y_axis_units '{y_axis_units}' for MVBS-derived ML data. "
                            f"Valid options: ['meters', 'range_sample', 'bins']")
     else:
-        print(f"Plotting ML echogram from regular Sv structure...")
-        print(f"  ML variable: {ml_var}")
+        logger.info("Plotting ML echogram from regular Sv structure...")
+        logger.info("  ML variable: %s", ml_var)
         
         if x_axis_units == 'bins':
             raise ValueError("x_axis_units='bins' is only valid for MVBS-derived ML data")
@@ -1584,17 +1325,17 @@ def plot_flattened_data_echogram(ds_ml, ml_dataset_name, ds_Sv_original=None, fr
             raise ValueError("y_axis_units='bins' is only valid for MVBS-derived ML data")
         
         if ds_Sv_original is not None:
-            print("  Note: ds_Sv_original provided but not needed for regular Sv-derived ML data")
+            logger.info("  Note: ds_Sv_original provided but not needed for regular Sv-derived ML data")
     
     if frequency_nominal is None:
         if 'frequency_nominal' in ds_ml.coords:
             frequency_nominal = ds_ml['frequency_nominal'].values
-            print(f"  Auto-detected frequencies: {[f'{int(f/1000)} kHz' for f in frequency_nominal]}")
+            logger.info("  Auto-detected frequencies: %s", [f'{int(f/1000)} kHz' for f in frequency_nominal])
         elif is_mvbs and ds_Sv_original is not None and 'frequency_nominal' in ds_Sv_original.get("Environment", {}):
             frequency_nominal = ds_Sv_original["Environment"]['frequency_nominal'].values
-            print(f"  Auto-detected frequencies from original: {[f'{int(f/1000)} kHz' for f in frequency_nominal]}")
+            logger.info("  Auto-detected frequencies from original: %s", [f'{int(f/1000)} kHz' for f in frequency_nominal])
         else:
-            print(f"  Frequency labels will be auto-detected from ML features")
+            logger.info("  Frequency labels will be auto-detected from ML features")
     
     return plot_processed_echogram_main(
         ds_Sv=ds_ml,
