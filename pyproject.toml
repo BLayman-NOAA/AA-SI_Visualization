@@ -41,7 +41,7 @@ dependencies = [
     "xarray>=2022.3.0",
     "matplotlib>=3.5.0",
     "echopype>=0.6.0",
-    "aa-si-utils @ git+https://github.com/BLayman-NOAA/AA-SI_Utils.git",
+    "aa-si-utils>=0.1.0",
 ]
 
 [project.optional-dependencies]
