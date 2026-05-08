@@ -42,7 +42,7 @@ active acoustics data processed through the AA-SI pipeline. Key capabilities inc
 
 ```bash
 # Clone the repository
-git clone https://github.com/nmfs-ost/AA-SI_Visualization.git
+git clone https://github.com/BLayman-NOAA/AA-SI_Visualization.git
 cd AA-SI_Visualization
 
 # Create a virtual environment
