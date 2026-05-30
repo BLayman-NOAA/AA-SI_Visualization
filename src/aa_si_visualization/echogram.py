@@ -13,6 +13,7 @@ lines.  The public API consists of:
 import logging
 import numpy as np
 from aa_si_utils import utils
+from ._artifact_output import configure_matplotlib_backend, render_figure
 from .echogram_handlers import create_handler
 from . import _plotting_utils as putils
 
@@ -652,6 +653,7 @@ def _create_cluster_plot(fig, handler, axes_config, ranges, cluster_info, cluste
     Returns:
         list: Axes objects created (length 1).
     """
+    configure_matplotlib_backend()
     import matplotlib.pyplot as plt
 
     logger.info("Creating cluster plot...")
@@ -711,6 +713,7 @@ def _create_multi_frequency_plot(fig, handler, axes_config, ranges, params):
     Returns:
         list: Axes objects created (one per frequency).
     """
+    configure_matplotlib_backend()
     import matplotlib.pyplot as plt
 
     logger.info("Creating multi-frequency plot...")
@@ -776,7 +779,9 @@ def _create_multi_frequency_plot(fig, handler, axes_config, ranges, params):
     return axes_list
 
 
-def _create_plot(handler, axes_config, ranges, params, ml_info=None, cluster_info=None, cluster_colors=None, overlay_lines=None):
+def _create_plot(handler, axes_config, ranges, params, ml_info=None, cluster_info=None,
+                 cluster_colors=None, overlay_lines=None, save_image=None,
+                 save_formats=None, save_dir=None, show=None, dpi=None):
     """Create the final echogram plot using matplotlib.
 
     Dispatches to :func:`_create_cluster_plot` for cluster data or
@@ -792,6 +797,7 @@ def _create_plot(handler, axes_config, ranges, params, ml_info=None, cluster_inf
         cluster_colors: Optional list of hex color strings.
         overlay_lines: Optional list of line overlay specifications.
     """
+    configure_matplotlib_backend()
     import matplotlib.pyplot as plt
 
     is_cluster_mode = (cluster_info is not None)
@@ -823,7 +829,15 @@ def _create_plot(handler, axes_config, ranges, params, ml_info=None, cluster_inf
             for line_spec in overlay_lines:
                 _add_overlay_line(ax, handler.dataset, line_spec, ping_min, ping_max, axes_config)
 
-    plt.show()
+    render_figure(
+        fig,
+        default_stem="echogram",
+        save_image=save_image,
+        save_formats=save_formats,
+        save_dir=save_dir,
+        show=show,
+        dpi=dpi,
+    )
     plt.style.use('default')
 
 
@@ -834,7 +848,9 @@ def plot_processed_echogram_main(ds_Sv, frequency_nominal, max_depth=None, min_d
                                 meters_per_second=None, y_to_x_aspect_ratio_override=None, 
                                 ml_vmin=None, ml_vmax=None, echodata=None, 
                                 ml_dataset_name=None, ml_specific_data_name=None, cluster_colors=None, 
-                                overlay_lines=None):
+                                overlay_lines=None, save_image=None,
+                                save_formats=None, save_dir=None, show=None,
+                                dpi=None):
     """
     Create an echogram plot for MVBS (gridded), regular Sv data, or ML/normalized data.
     
@@ -932,7 +948,21 @@ def plot_processed_echogram_main(ds_Sv, frequency_nominal, max_depth=None, min_d
     axes_config = _calculate_axes(handler, ranges, params, echodata)
     
     logger.info("Creating plot...")
-    _create_plot(handler, axes_config, ranges, params, ml_info, cluster_info, cluster_colors=cluster_colors, overlay_lines=overlay_lines)
+    _create_plot(
+        handler,
+        axes_config,
+        ranges,
+        params,
+        ml_info,
+        cluster_info,
+        cluster_colors=cluster_colors,
+        overlay_lines=overlay_lines,
+        save_image=save_image,
+        save_formats=save_formats,
+        save_dir=save_dir,
+        show=show,
+        dpi=dpi,
+    )
 
 
 def plot_cluster_echogram(ds_ml_ready, dataset_name, specific_data_name, 
@@ -940,7 +970,9 @@ def plot_cluster_echogram(ds_ml_ready, dataset_name, specific_data_name,
                          x_axis_units='seconds', y_axis_units='meters', 
                          meters_per_second=None, echodata=None,
                          y_to_x_aspect_ratio_override=None, gridded_data=None,
-                         ds_Sv_original=None, cluster_colors=None, overlay_lines=None):
+                         ds_Sv_original=None, cluster_colors=None, overlay_lines=None,
+                         save_image=None, save_formats=None, save_dir=None,
+                         show=None, dpi=None):
     """
     Plot cluster analysis results as echogram visualization.
     
@@ -1068,7 +1100,12 @@ def plot_cluster_echogram(ds_ml_ready, dataset_name, specific_data_name,
         ml_dataset_name=dataset_name,
         ml_specific_data_name=f"{specific_data_name}_grid",
         cluster_colors=cluster_colors,
-        overlay_lines=overlay_lines
+        overlay_lines=overlay_lines,
+        save_image=save_image,
+        save_formats=save_formats,
+        save_dir=save_dir,
+        show=show,
+        dpi=dpi,
     )
 
 
@@ -1077,7 +1114,9 @@ def plot_sv_echogram(ds_Sv, ds_Sv_original=None, frequency_nominal=None, min_dep
                      sv_cmap='viridis', use_corrected_Sv=False,
                      x_axis_units='seconds', y_axis_units='meters',
                      meters_per_second=None, echodata=None,
-                     y_to_x_aspect_ratio_override=None, overlay_lines=None
+                     y_to_x_aspect_ratio_override=None, overlay_lines=None,
+                     save_image=None, save_formats=None, save_dir=None,
+                     show=None, dpi=None
                      ):
     """
     Plot Sv echogram data (regular or MVBS).
@@ -1202,7 +1241,12 @@ def plot_sv_echogram(ds_Sv, ds_Sv_original=None, frequency_nominal=None, min_dep
         echodata=echodata,
         ml_dataset_name=None,
         ml_specific_data_name=None,
-        overlay_lines=overlay_lines
+        overlay_lines=overlay_lines,
+        save_image=save_image,
+        save_formats=save_formats,
+        save_dir=save_dir,
+        show=show,
+        dpi=dpi,
     )
 
 
@@ -1211,7 +1255,9 @@ def plot_flattened_data_echogram(ds_ml, ml_dataset_name, ds_Sv_original=None, fr
                      ping_min=0, ping_max=None, ml_vmin=None, ml_vmax=None,
                      sv_cmap='viridis', x_axis_units='seconds', y_axis_units='meters',
                      meters_per_second=None, echodata=None,
-                     y_to_x_aspect_ratio_override=None, overlay_lines=None
+                     y_to_x_aspect_ratio_override=None, overlay_lines=None,
+                     save_image=None, save_formats=None, save_dir=None,
+                     show=None, dpi=None
                      ):
     """
     Plot ML-processed echogram data (regular Sv-derived or MVBS-derived).
@@ -1358,7 +1404,12 @@ def plot_flattened_data_echogram(ds_ml, ml_dataset_name, ds_Sv_original=None, fr
         echodata=echodata,
         ml_dataset_name=ml_dataset_name,
         ml_specific_data_name=ml_specific_data_name,
-        overlay_lines=overlay_lines
+        overlay_lines=overlay_lines,
+        save_image=save_image,
+        save_formats=save_formats,
+        save_dir=save_dir,
+        show=show,
+        dpi=dpi,
     )
 
 

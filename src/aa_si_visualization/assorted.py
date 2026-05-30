@@ -2,6 +2,9 @@
 
 import logging
 import numpy as np
+from ._artifact_output import configure_matplotlib_backend, render_figure
+
+configure_matplotlib_backend()
 import matplotlib.pyplot as plt
 from aa_si_utils import utils
 from . import _plotting_utils as putils
@@ -166,7 +169,11 @@ def sv_differences_echograms(ds_Sv_baseline, ds_Sv_calibrated, frequencies, max_
     
     plt.suptitle('Calibration Comparison: EchoPype Defaults vs CAL Report Parameters', 
                 fontsize=16, fontweight='bold', y=0.96)
-    plt.show()
+    render_figure(
+        fig,
+        default_stem='sv_differences',
+        artifact_suffix='comparison',
+    )
 
 
 
