@@ -72,6 +72,7 @@ def render_figure(
     ctx = _load_execution_context()
     mode = getattr(ctx, "mode", None)
     output_dir = getattr(ctx, "output_dir", None)
+    artifacts_dir = getattr(ctx, "artifacts_dir", None)
     step_id = getattr(ctx, "step_id", None)
 
     normalized_formats = _normalize_formats(save_formats)
@@ -94,6 +95,8 @@ def render_figure(
 
     if save_dir is not None:
         resolved_save_dir = Path(save_dir)
+    elif artifacts_dir is not None:
+        resolved_save_dir = Path(artifacts_dir) / IMAGE_OUTPUT_DIR
     elif output_dir is not None:
         resolved_save_dir = Path(output_dir) / IMAGE_OUTPUT_DIR
     else:
