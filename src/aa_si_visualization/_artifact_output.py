@@ -2,7 +2,55 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
+from typing import Any
+
+_URL_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]+://")
+_LOCAL_PROTOCOLS = frozenset({"file", "local"})
+
+
+def _is_remote(value: Any) -> bool:
+    """True when a directory value is a non-local fsspec URL / remote location."""
+    if value is None:
+        return False
+    is_local = getattr(value, "is_local", None)
+    if isinstance(is_local, bool):
+        return not is_local
+    if isinstance(value, Path):
+        return False
+    match = _URL_SCHEME_RE.match(str(value))
+    if match is None:
+        return False
+    return str(value)[: match.end() - 3].lower() not in _LOCAL_PROTOCOLS
+
+
+def _storage_options(value: Any) -> dict | None:
+    opts = getattr(value, "storage_options", None)
+    return dict(opts) if opts else None
+
+
+def _join_dir(base: Any, segment: str) -> Path | str:
+    """Append a path segment; Path for local bases, URL str for remote."""
+    if _is_remote(base):
+        return str(base).rstrip("/") + "/" + segment
+    return Path(base) / segment
+
+
+def _save_figure_to(fig, directory: Any, filename: str, *, dpi, fmt) -> Path | str:
+    """Save a figure into ``directory`` (local dir or fsspec URL); return its path."""
+    if _is_remote(directory):
+        import fsspec
+
+        url = str(directory).rstrip("/") + "/" + filename
+        with fsspec.open(url, "wb", **(_storage_options(directory) or {})) as fh:
+            fig.savefig(fh, dpi=dpi, bbox_inches="tight", format=fmt)
+        return url
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / filename
+    fig.savefig(path, dpi=dpi, bbox_inches="tight", format=fmt)
+    return path
 
 
 IMAGE_OUTPUT_DIR = "images"
@@ -93,12 +141,15 @@ def render_figure(
     else:
         resolved_formats = []
 
+    # An explicit save_dir is used as-is; artifacts_dir/output_dir get the
+    # IMAGE_OUTPUT_DIR subfolder. Any of these may be a local path or an fsspec
+    # URL (gs://...) — a StorageLocation from the recipe executor, or a raw URL.
     if save_dir is not None:
-        resolved_save_dir = Path(save_dir)
+        resolved_save_dir: Any = save_dir
     elif artifacts_dir is not None:
-        resolved_save_dir = Path(artifacts_dir) / IMAGE_OUTPUT_DIR
+        resolved_save_dir = _join_dir(artifacts_dir, IMAGE_OUTPUT_DIR)
     elif output_dir is not None:
-        resolved_save_dir = Path(output_dir) / IMAGE_OUTPUT_DIR
+        resolved_save_dir = _join_dir(output_dir, IMAGE_OUTPUT_DIR)
     else:
         resolved_save_dir = Path.cwd() / IMAGE_OUTPUT_DIR
 
@@ -108,12 +159,13 @@ def render_figure(
 
     written_paths = []
     if resolved_formats:
-        resolved_save_dir.mkdir(parents=True, exist_ok=True)
         resolved_dpi = 300 if dpi is None else dpi
         for fmt in resolved_formats:
-            path = resolved_save_dir / f"{stem}.{fmt}"
-            fig.savefig(path, dpi=resolved_dpi, bbox_inches="tight", format=fmt)
-            written_paths.append(path)
+            written_paths.append(
+                _save_figure_to(
+                    fig, resolved_save_dir, f"{stem}.{fmt}", dpi=resolved_dpi, fmt=fmt
+                )
+            )
 
     if resolved_show:
         import matplotlib.pyplot as plt

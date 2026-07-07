@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Figures can be saved to a `gs://` outputs directory: `render_figure` writes
+  via fsspec when the resolved save directory (or the recipe executor's
+  `artifacts_dir`) is a remote URL, and stays on `pathlib` for local dirs.
+  Requires the `gcs` extra; credentials via Application Default Credentials.
 - Echogram plotting with configurable depth, ping range, and color scales
 - Cluster echogram visualization with categorical coloring
 - ML feature echogram display for regridded/normalized data

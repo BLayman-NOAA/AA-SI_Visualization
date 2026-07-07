@@ -42,6 +42,7 @@ dependencies = [
     "matplotlib>=3.5.0",
     "echopype>=0.6.0",
     "aa-si-utils>=0.1.0",
+    "fsspec>=2024.1",
 ]
 
 [project.optional-dependencies]
@@ -51,6 +52,11 @@ dev = [
     "black>=24.0.0",
     "pylint>=3.0.0",
     "pre-commit>=3.0.0",
+]
+# Save figures to gs:// (remote outputs dir). gcsfs registers the fsspec "gs"
+# protocol; credentials come from Application Default Credentials.
+gcs = [
+    "gcsfs>=2024.1",
 ]
 docs = [
     "mkdocs>=1.5.0",
