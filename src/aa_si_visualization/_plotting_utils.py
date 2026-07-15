@@ -112,8 +112,7 @@ def calculate_x_axis_extent(ping_times, ping_min, ping_max, x_axis_units,
             x_axis_units is 'meters', will attempt GPS calculation.
         echodata: Original echodata object for GPS speed calculation. Required
             when meters_per_second is None and x_axis_units is 'meters'.
-        handler: Optional EchogramDataHandler, used for MVBS ping labels and
-            GPS index lookup.
+        handler: Optional EchogramDataHandler, used for MVBS ping labels.
 
     Returns:
         tuple: (x_extent_min, x_extent_max, x_label)
@@ -149,7 +148,8 @@ def calculate_x_axis_extent(ping_times, ping_min, ping_max, x_axis_units,
 
         if meters_per_second is None:
             meters_per_second = _calculate_speed_from_gps(
-                handler, echodata, ping_min, ping_max, start, end
+                echodata, ping_times[ping_min], ping_times[ping_max],
+                start, end
             )
 
         return start * meters_per_second, end * meters_per_second, 'Distance (meters)'
@@ -160,16 +160,18 @@ def calculate_x_axis_extent(ping_times, ping_min, ping_max, x_axis_units,
     raise ValueError(f"Invalid x_axis_units '{x_axis_units}'. Valid options: {valid}")
 
 
-def _calculate_speed_from_gps(handler, echodata, ping_min, ping_max,
+def _calculate_speed_from_gps(echodata, start_time, end_time,
                               start_seconds, end_seconds):
     """Derive vessel speed from GPS coordinates in echodata.
 
+    Platform latitude/longitude are dimensioned by ``time1`` (NMEA datagram
+    timestamps), not by ping, so positions are looked up by nearest time
+    rather than by ping index.
+
     Args:
-        handler: EchogramDataHandler (used to get original ping indices for
-            MVBS data).
         echodata: Echodata object with Platform lat/lon.
-        ping_min: Current ping min index.
-        ping_max: Current ping max index.
+        start_time: Timestamp (datetime64) of the first ping shown.
+        end_time: Timestamp (datetime64) of the last ping shown.
         start_seconds: Start time in seconds from first ping.
         end_seconds: End time in seconds from first ping.
 
@@ -177,7 +179,8 @@ def _calculate_speed_from_gps(handler, echodata, ping_min, ping_max,
         float: Calculated speed in meters per second.
 
     Raises:
-        ValueError: If echodata is not provided.
+        ValueError: If echodata is not provided or contains no valid GPS
+            fixes.
     """
     if echodata is None:
         raise ValueError(
@@ -185,14 +188,23 @@ def _calculate_speed_from_gps(handler, echodata, ping_min, ping_max,
             "provided and x_axis_units='meters'"
         )
 
-    orig_min = getattr(handler, 'ping_min', ping_min) if handler else ping_min
-    orig_max = getattr(handler, 'ping_max', ping_max) if handler else ping_max
-
     logger.info("Using GPS calculation for meters_per_second...")
-    start_lat = echodata["Platform"]["latitude"][orig_min]
-    start_lon = echodata["Platform"]["longitude"][orig_min]
-    end_lat = echodata["Platform"]["latitude"][orig_max]
-    end_lon = echodata["Platform"]["longitude"][orig_max]
+    lat = echodata["Platform"]["latitude"]
+    lon = echodata["Platform"]["longitude"]
+
+    valid = np.isfinite(lat.values) & np.isfinite(lon.values)
+    if not valid.any():
+        raise ValueError(
+            "No valid GPS fixes in echodata Platform group; pass "
+            "meters_per_second explicitly"
+        )
+    lat = lat.isel(time1=np.flatnonzero(valid))
+    lon = lon.isel(time1=np.flatnonzero(valid))
+
+    start_lat = lat.sel(time1=start_time, method="nearest")
+    start_lon = lon.sel(time1=start_time, method="nearest")
+    end_lat = lat.sel(time1=end_time, method="nearest")
+    end_lon = lon.sel(time1=end_time, method="nearest")
 
     distance_meters = utils.haversine_distance(
         start_lat, start_lon, end_lat, end_lon
