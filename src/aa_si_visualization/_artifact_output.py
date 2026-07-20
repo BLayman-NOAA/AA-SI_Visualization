@@ -157,15 +157,25 @@ def render_figure(
     if artifact_suffix:
         stem = f"{stem}_{artifact_suffix}"
 
+    # Record artifacts relative to artifacts_dir only when we saved under it
+    # (the recipe-executor case). A save_dir override or an output_dir/cwd
+    # fallback is not relativizable, so nothing is recorded — the executor then
+    # treats the step as unverifiable and regenerates it.
+    artifact_sink = getattr(ctx, "artifact_sink", None)
+    record_relative = save_dir is None and artifacts_dir is not None
+
     written_paths = []
     if resolved_formats:
         resolved_dpi = 300 if dpi is None else dpi
         for fmt in resolved_formats:
+            filename = f"{stem}.{fmt}"
             written_paths.append(
                 _save_figure_to(
-                    fig, resolved_save_dir, f"{stem}.{fmt}", dpi=resolved_dpi, fmt=fmt
+                    fig, resolved_save_dir, filename, dpi=resolved_dpi, fmt=fmt
                 )
             )
+            if artifact_sink is not None and record_relative:
+                artifact_sink.append(f"{IMAGE_OUTPUT_DIR}/{filename}")
 
     if resolved_show:
         import matplotlib.pyplot as plt
