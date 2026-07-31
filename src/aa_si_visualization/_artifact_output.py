@@ -80,8 +80,12 @@ def configure_matplotlib_backend() -> None:
     """
     ctx = _load_execution_context()
     mode = getattr(ctx, "mode", None)
-    output_dir = getattr(ctx, "output_dir", None)
-    if mode != "direct" or output_dir is None:
+    # The recipe executor exposes the user-facing outputs location as
+    # ``artifacts_dir``; ``output_dir`` is kept only for backward compatibility.
+    direct_output = getattr(ctx, "artifacts_dir", None)
+    if direct_output is None:
+        direct_output = getattr(ctx, "output_dir", None)
+    if mode != "direct" or direct_output is None:
         return
 
     import matplotlib
@@ -119,9 +123,14 @@ def render_figure(
     """Save and/or show a matplotlib figure based on runtime defaults."""
     ctx = _load_execution_context()
     mode = getattr(ctx, "mode", None)
-    output_dir = getattr(ctx, "output_dir", None)
     artifacts_dir = getattr(ctx, "artifacts_dir", None)
+    output_dir = getattr(ctx, "output_dir", None)
     step_id = getattr(ctx, "step_id", None)
+
+    # The recipe executor exposes the user-facing outputs location as
+    # ``artifacts_dir``; ``output_dir`` is kept only for backward compatibility.
+    direct_output = artifacts_dir if artifacts_dir is not None else output_dir
+    direct_save = mode == "direct" and direct_output is not None
 
     normalized_formats = _normalize_formats(save_formats)
     if normalized_formats:
@@ -129,12 +138,12 @@ def render_figure(
     elif save_image is not None:
         resolved_save_image = bool(save_image)
     else:
-        resolved_save_image = bool(mode == "direct" and output_dir is not None)
+        resolved_save_image = bool(direct_save)
 
     if show is not None:
         resolved_show = bool(show)
     else:
-        resolved_show = not (mode == "direct" and output_dir is not None)
+        resolved_show = not direct_save
 
     if resolved_save_image:
         resolved_formats = normalized_formats or ["png"]

@@ -88,3 +88,27 @@ def test_render_figure_remote_via_artifacts_dir_context(a_figure):
     # step_id wins over default_stem; images/ subfolder appended to artifacts_dir.
     assert written == ["memory://run/outputs/images/plot_sv.png"]
     assert fsspec.filesystem("memory").exists(written[0])
+
+
+def test_render_figure_saves_by_default_under_executor_context(a_figure):
+    """The recipe-executor path (mode=direct + artifacts_dir, no explicit save
+    params) must save an image and record it in the artifact sink.
+
+    Regression guard: the save/show gates must key off ``artifacts_dir`` (the
+    field the executor actually populates), not a stale ``output_dir``.
+    """
+    from aa_recipe_manager.executor.runtime_context import execution_context
+
+    sink: list[str] = []
+    with execution_context(
+        mode="direct",
+        artifacts_dir="memory://run/outputs",
+        step_id="plot_sv_clean",
+        artifact_sink=sink,
+    ):
+        written = ao.render_figure(a_figure, default_stem="echogram")
+
+    assert written == ["memory://run/outputs/images/plot_sv_clean.png"]
+    assert fsspec.filesystem("memory").exists(written[0])
+    # Recorded relative to artifacts_dir so the executor can verify the step.
+    assert sink == ["images/plot_sv_clean.png"]

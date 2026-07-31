@@ -14,6 +14,23 @@ from aa_si_utils import utils
 logger = logging.getLogger(__name__)
 
 
+def _closest_index_in_1d(values, target):
+    """Return the index in a 1D array closest to ``target``, ignoring NaN.
+
+    MVBS ``echo_range`` can be NaN-padded at depth (e.g. when derived from
+    multi-channel Sv with differing sample counts). Plain ``np.argmin`` would
+    return the index of the first NaN rather than the closest valid depth, so
+    mask NaNs out here.
+    """
+    diff = np.abs(np.asarray(values) - target)
+    if np.all(np.isnan(diff)):
+        raise ValueError(
+            "echo_range is entirely NaN; cannot resolve a range index for the "
+            "target depth"
+        )
+    return int(np.nanargmin(diff))
+
+
 class EchogramDataHandler(ABC):
     """Abstract base class for handling different echogram data structures."""
     
@@ -190,9 +207,9 @@ class MvbsDataHandler(EchogramDataHandler):
     
     def calculate_depth_indices(self, min_depth, max_depth):
         """Calculate depth indices using direct array search."""
-        self.min_depth_index = np.argmin(np.abs(self.echo_range_values - min_depth))
-        self.max_depth_index = np.argmin(np.abs(self.echo_range_values - max_depth))
-        
+        self.min_depth_index = _closest_index_in_1d(self.echo_range_values, min_depth)
+        self.max_depth_index = _closest_index_in_1d(self.echo_range_values, max_depth)
+
         return (self.min_depth_index, self.max_depth_index)
     
     def calculate_ping_range(self, ping_min, ping_max, original_ds=None):
@@ -372,8 +389,8 @@ class ClusterDataHandler(EchogramDataHandler):
         """Calculate depth indices based on structure type."""
         if self.is_mvbs:
             # MVBS: direct array search
-            self.min_depth_index = np.argmin(np.abs(self.echo_range_values - min_depth))
-            self.max_depth_index = np.argmin(np.abs(self.echo_range_values - max_depth))
+            self.min_depth_index = _closest_index_in_1d(self.echo_range_values, min_depth)
+            self.max_depth_index = _closest_index_in_1d(self.echo_range_values, max_depth)
         else:
             # Sv: use helper function
             self.min_depth_index = utils.get_closest_index_for_depth(self.dataset, min_depth)
