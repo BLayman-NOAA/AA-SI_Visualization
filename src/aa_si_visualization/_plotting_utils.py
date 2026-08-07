@@ -6,6 +6,21 @@ from aa_si_utils import utils
 
 logger = logging.getLogger(__name__)
 
+# Drawn size of a single echogram panel, in inches. A panel is the imshow box
+# for one frequency; the figure stacks one per channel plus fixed chrome bands.
+BASE_PANEL_WIDTH_IN = 24.0
+MAX_PANEL_WIDTH_IN = 60.0
+MIN_PANEL_ASPECT = 1 / 8
+MAX_PANEL_ASPECT = 3.0
+
+# Chrome reserved around the panels, in inches.
+PANEL_GAP_IN = 1.1
+TITLE_BAND_IN = 1.2
+COLORBAR_BAND_IN = 1.6
+YLABEL_BAND_IN = 1.0
+RIGHT_MARGIN_IN = 0.4
+CLUSTER_COLORBAR_BAND_IN = 1.8
+
 
 def is_mvbs_dataset(ds):
     """Check whether a dataset uses the MVBS (gridded) structure.
@@ -66,6 +81,9 @@ def calculate_plot_dimensions(x_extent_min, x_extent_max, y_extent_min,
                               y_extent_max, y_to_x_aspect_ratio_override=None):
     """Calculate imshow extent, aspect ratio, and figure size multipliers.
 
+    New code should use :func:`calculate_panel_geometry`, which sizes the panel
+    directly instead of relying on imshow to shrink the axes box.
+
     Args:
         x_extent_min: Minimum x-axis extent.
         x_extent_max: Maximum x-axis extent.
@@ -94,6 +112,77 @@ def calculate_plot_dimensions(x_extent_min, x_extent_max, y_extent_min,
         height_multiplier = min(3, aspect_ratio)
 
     return extent, aspect_ratio, width_multiplier, height_multiplier
+
+
+def calculate_panel_geometry(x_extent_min, x_extent_max, y_extent_min,
+                             y_extent_max, y_to_x_aspect_ratio_override=None):
+    """Calculate imshow extent and the drawn size of a single echogram panel.
+
+    The panel shape follows the square of the data aspect, which is what the
+    older imshow-driven sizing produced, but clamped so that very wide, shallow
+    windows do not collapse the panel into a sliver.
+
+    Args:
+        x_extent_min: Minimum x-axis extent.
+        x_extent_max: Maximum x-axis extent.
+        y_extent_min: Minimum y-axis extent.
+        y_extent_max: Maximum y-axis extent.
+        y_to_x_aspect_ratio_override: Optional panel width-to-height ratio.
+            When given, the panel is exactly this many times wider than tall
+            and the automatic clamp is skipped.
+
+    Returns:
+        dict: With keys ``extent`` (``[left, right, bottom, top]`` for imshow),
+            ``data_aspect``, ``panel_aspect`` (height / width of the drawn
+            panel), ``panel_width``, ``panel_height`` (both in inches), and
+            ``clamped`` (whether the automatic panel aspect hit a limit).
+    """
+    extent = [x_extent_min, x_extent_max, y_extent_max, y_extent_min]
+
+    x_range = abs(x_extent_max - x_extent_min)
+    y_range = abs(y_extent_max - y_extent_min)
+    data_aspect = y_range / x_range
+
+    if y_to_x_aspect_ratio_override is not None:
+        panel_aspect = 1 / y_to_x_aspect_ratio_override
+        clamped = False
+    else:
+        panel_aspect = min(max(data_aspect ** 2, MIN_PANEL_ASPECT), MAX_PANEL_ASPECT)
+        clamped = panel_aspect != data_aspect ** 2
+
+    panel_width = BASE_PANEL_WIDTH_IN
+    if data_aspect < 1:
+        panel_width = min(MAX_PANEL_WIDTH_IN, BASE_PANEL_WIDTH_IN / data_aspect)
+
+    return {
+        'extent': extent,
+        'data_aspect': data_aspect,
+        'panel_aspect': panel_aspect,
+        'panel_width': panel_width,
+        'panel_height': panel_width * panel_aspect,
+        'clamped': clamped,
+    }
+
+
+def figure_height_for_panels(panel_height, n_panels,
+                             colorbar_band=COLORBAR_BAND_IN):
+    """Calculate figure height in inches for a vertical stack of panels.
+
+    Args:
+        panel_height: Drawn height of one panel in inches.
+        n_panels: Number of stacked panels.
+        colorbar_band: Inches reserved below the panels for the colorbar and
+            x-axis label.
+
+    Returns:
+        float: Figure height in inches.
+    """
+    return (
+        TITLE_BAND_IN
+        + n_panels * panel_height
+        + (n_panels - 1) * PANEL_GAP_IN
+        + colorbar_band
+    )
 
 
 def calculate_x_axis_extent(ping_times, ping_min, ping_max, x_axis_units,

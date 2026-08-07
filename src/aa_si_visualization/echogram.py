@@ -20,7 +20,30 @@ from . import _plotting_utils as putils
 logger = logging.getLogger(__name__)
 
 
-def _setup_parameters(ds_Sv, frequency_nominal, max_depth, min_depth, ping_min, ping_max, 
+def _numeric_frequencies(frequency_nominal, n_channels):
+    """Coerce nominal frequencies to a float list for ordering.
+
+    Args:
+        frequency_nominal: Scalar or array-like of nominal frequencies.
+        n_channels (int): Expected number of channels.
+
+    Returns:
+        list or None: One float per channel, or None when the values are not
+        numeric or do not cover every channel.
+    """
+    values = frequency_nominal
+    if isinstance(values, str) or not hasattr(values, '__iter__'):
+        values = [values]
+
+    try:
+        numeric = [float(value) for value in values]
+    except (TypeError, ValueError):
+        return None
+
+    return numeric if len(numeric) == n_channels else None
+
+
+def _setup_parameters(ds_Sv, frequency_nominal, max_depth, min_depth, ping_min, ping_max,
                      sv_vmin, sv_vmax, sv_cmap, ds_Sv_original, use_corrected_Sv, 
                      x_axis_units, y_axis_units, meters_per_second, y_to_x_aspect_ratio_override,
                      ml_vmin, ml_vmax, echodata, ml_dataset_name, ml_specific_data_name):
@@ -33,10 +56,15 @@ def _setup_parameters(ds_Sv, frequency_nominal, max_depth, min_depth, ping_min, 
     Returns:
         dict: Consolidated parameters with defaults applied and ML variable name constructed
     """
-    # Set default ping range if not provided
+    # A None ping bound means the full extent. When an original dataset is
+    # supplied the bounds index its ping axis, not ds_Sv's, because MVBS and ML
+    # grids are converted back to that axis downstream.
+    reference_ds = ds_Sv_original if ds_Sv_original is not None else ds_Sv
+    if ping_min is None:
+        ping_min = 0
     if ping_max is None:
-        ping_max = len(ds_Sv['ping_time']) - 1
-    
+        ping_max = len(reference_ds['ping_time']) - 1
+
     # Get frequency labels if frequency_nominal provided
     freq_labels = None
     n_channels = None
@@ -51,7 +79,18 @@ def _setup_parameters(ds_Sv, frequency_nominal, max_depth, min_depth, ping_min, 
             # Single value or string - wrap in list
             freq_labels = [str(frequency_nominal)]
         n_channels = len(freq_labels)
-    
+
+    # Channels are stored in transducer install order; stack the panels by
+    # increasing frequency instead. Holds dataset channel indices in the order
+    # they should be drawn, top to bottom.
+    channel_order = None
+    if n_channels is not None:
+        channel_order = list(range(n_channels))
+        frequency_values = _numeric_frequencies(frequency_nominal, n_channels)
+        if frequency_values is not None:
+            channel_order.sort(key=lambda index: frequency_values[index])
+
+
     # Construct ML variable name
     ml_data_variable = None
     if ml_dataset_name is not None:
@@ -65,6 +104,7 @@ def _setup_parameters(ds_Sv, frequency_nominal, max_depth, min_depth, ping_min, 
         'ping_max': ping_max,
         'freq_labels': freq_labels,
         'n_channels': n_channels,
+        'channel_order': channel_order,
         'ml_data_variable': ml_data_variable,
         'max_depth': max_depth,
         'min_depth': min_depth,
@@ -132,7 +172,8 @@ def _prepare_ml_data(ds_Sv, params):
         # Set parameters for single-channel display
         params['n_channels'] = 1
         params['freq_labels'] = ['Cluster Results']
-        
+        params['channel_order'] = [0]
+
         return (ds_Sv, None, sv_variable_name, cluster_info)
     
     # Regular ML data processing (multi-feature)
@@ -192,9 +233,11 @@ def _prepare_ml_data(ds_Sv, params):
         else:
             ml_vmin, ml_vmax = 0, 1  # Fallback
     
-    # Update params with ML-specific values
+    # Update params with ML-specific values. ML features are not channels, so
+    # they keep the order the feature extraction produced.
     params['freq_labels'] = freq_labels
     params['n_channels'] = n_features
+    params['channel_order'] = list(range(n_features))
     params['sv_vmin'] = ml_vmin
     params['sv_vmax'] = ml_vmax
     
@@ -295,12 +338,16 @@ def _filter_nan_frequencies(ds_Sv, sv_variable_name, params, cluster_info):
         if params['n_channels']:
             params['valid_channel_indices'] = list(range(params['n_channels']))
         return params
-    
+
+    # Walk the display order so the surviving channels and their labels come
+    # out sorted by frequency rather than by dataset position.
+    channel_order = params.get('channel_order') or list(range(params['n_channels']))
+
     logger.info("Checking for all-NaN frequencies...")
     valid_channels = []
     valid_freq_labels = []
-    
-    for freq_idx in range(params['n_channels']):
+
+    for freq_idx in channel_order:
         # Get a sample slice to check for data
         try:
             if sv_variable_name in ds_Sv:
@@ -332,12 +379,13 @@ def _filter_nan_frequencies(ds_Sv, sv_variable_name, params, cluster_info):
     if len(valid_channels) < params['n_channels']:
         logger.info("  Reduced from %s to %s valid frequencies", params['n_channels'], len(valid_channels))
         params['n_channels'] = len(valid_channels)
-        params['freq_labels'] = valid_freq_labels
-        params['valid_channel_indices'] = valid_channels
     else:
         logger.info("  All %s frequencies contain valid data", params['n_channels'])
-        params['valid_channel_indices'] = list(range(params['n_channels']))
-    
+
+    if params['freq_labels']:
+        params['freq_labels'] = valid_freq_labels
+    params['valid_channel_indices'] = valid_channels
+
     return params
 
 
@@ -547,11 +595,11 @@ def _calculate_axes(handler, ranges, params, echodata):
         data_type,
     )
     
-    # Calculate plot dimensions and aspect ratio
-    extent, aspect_ratio, width_mult, height_mult = putils.calculate_plot_dimensions(
+    # Calculate the drawn size of one panel
+    geometry = putils.calculate_panel_geometry(
         x_min, x_max, y_min, y_max, params['y_to_x_aspect_ratio_override']
     )
-    
+
     # Log diagnostics
     logger.info("%s Echogram dimensions:", data_type)
     
@@ -568,16 +616,23 @@ def _calculate_axes(handler, ranges, params, echodata):
     logger.info("  Y-axis (%s): %.1f to %.1f", params['y_axis_units'], y_min, y_max)
     logger.info("  Features: %s", params['n_channels'])
     logger.info("  Depth Range: %.1fm to %.1fm", ranges['depth']['min_shown'], ranges['depth']['max_shown'])
-    logger.info("  Aspect ratio (1:1 in specified units): %.3f", aspect_ratio)
-    
+    logger.info("  Aspect ratio (1:1 in specified units): %.3f", geometry['data_aspect'])
+    logger.info(
+        "  Panel: %.1f x %.1f in (1:%.1f wide)%s",
+        geometry['panel_width'], geometry['panel_height'],
+        1 / geometry['panel_aspect'],
+        " [clamped]" if geometry['clamped'] else "",
+    )
+
     # Return consolidated axis configuration
     return {
         'x': {'min': x_min, 'max': x_max, 'label': x_label},
         'y': {'min': y_min, 'max': y_max, 'label': y_label},
-        'extent': extent,
-        'aspect_ratio': aspect_ratio,
-        'width_multiplier': width_mult,
-        'height_multiplier': height_mult
+        'extent': geometry['extent'],
+        'data_aspect': geometry['data_aspect'],
+        'panel_aspect': geometry['panel_aspect'],
+        'panel_width': geometry['panel_width'],
+        'panel_height': geometry['panel_height'],
     }
 
 
@@ -670,7 +725,7 @@ def _create_cluster_plot(fig, handler, axes_config, ranges, cluster_info, cluste
 
     im = ax.imshow(
         cluster_data.T,
-        aspect=axes_config['aspect_ratio'],
+        aspect='auto',
         cmap=cmap,
         norm=norm,
         extent=axes_config['extent'],
@@ -683,10 +738,24 @@ def _create_cluster_plot(fig, handler, axes_config, ranges, cluster_info, cluste
     ax.set_xlabel(axes_config['x']['label'], fontsize=10, color='white')
     ax.tick_params(colors='white')
 
-    plt.tight_layout(pad=3.0)
-    fig.subplots_adjust(right=0.85, top=0.92)
+    # The cluster colorbar is vertical, so its band comes off the width.
+    fig_width, fig_height = fig.get_size_inches()
+    panel_right = 1 - (
+        putils.CLUSTER_COLORBAR_BAND_IN + putils.RIGHT_MARGIN_IN
+    ) / fig_width
+    fig.subplots_adjust(
+        left=putils.YLABEL_BAND_IN / fig_width,
+        right=panel_right,
+        top=1 - putils.TITLE_BAND_IN / fig_height,
+        bottom=putils.PANEL_GAP_IN / fig_height,
+    )
 
-    cbar_ax = fig.add_axes([0.87, 0.15, 0.02, 0.7])
+    cbar_ax = fig.add_axes([
+        panel_right + 0.4 / fig_width,
+        putils.PANEL_GAP_IN / fig_height,
+        0.25 / fig_width,
+        axes_config['panel_height'] / fig_height,
+    ])
     cbar_ax.set_facecolor('black')
     cbar = fig.colorbar(im, cax=cbar_ax)
     cbar.set_label('Cluster ID', fontsize=12, color='white')
@@ -695,7 +764,8 @@ def _create_cluster_plot(fig, handler, axes_config, ranges, cluster_info, cluste
     cbar.set_ticklabels(tick_labels)
 
     plt.suptitle('Cluster Analysis - Multi-frequency Acoustic Backscatter Classification',
-                 fontsize=16, fontweight='bold', color='white', y=0.96)
+                 fontsize=16, fontweight='bold', color='white',
+                 y=1 - 0.45 / fig_height)
 
     return [ax]
 
@@ -739,7 +809,7 @@ def _create_multi_frequency_plot(fig, handler, axes_config, ranges, params):
 
         im = ax.imshow(
             sv_data.T,
-            aspect=axes_config['aspect_ratio'],
+            aspect='auto',
             vmin=params['sv_vmin'],
             vmax=params['sv_vmax'],
             cmap=params['sv_cmap'],
@@ -758,10 +828,18 @@ def _create_multi_frequency_plot(fig, handler, axes_config, ranges, params):
         if plot_idx == n_channels - 1:
             ax.set_xlabel(axes_config['x']['label'], fontsize=10, color='white')
 
-    plt.tight_layout(pad=3.0, h_pad=5.0, w_pad=2.0)
-    fig.subplots_adjust(bottom=0.12, top=0.92)
+    # Place the axes in inches rather than figure fractions so the chrome stays
+    # the same size however tall the stack of panels gets.
+    fig_width, fig_height = fig.get_size_inches()
+    fig.subplots_adjust(
+        left=putils.YLABEL_BAND_IN / fig_width,
+        right=1 - putils.RIGHT_MARGIN_IN / fig_width,
+        top=1 - putils.TITLE_BAND_IN / fig_height,
+        bottom=putils.COLORBAR_BAND_IN / fig_height,
+        hspace=putils.PANEL_GAP_IN / axes_config['panel_height'],
+    )
 
-    cbar_ax = fig.add_axes([0.15, 0.05, 0.7, 0.02])
+    cbar_ax = fig.add_axes([0.15, 0.5 / fig_height, 0.7, 0.25 / fig_height])
     cbar_ax.set_facecolor('black')
     cbar = fig.colorbar(sv_image, cax=cbar_ax, orientation='horizontal')
 
@@ -774,7 +852,8 @@ def _create_multi_frequency_plot(fig, handler, axes_config, ranges, params):
 
     cbar.set_label(cbar_label, fontsize=10, color='white')
     cbar.ax.tick_params(colors='white')
-    plt.suptitle(plot_title, fontsize=16, fontweight='bold', y=0.96, color='white')
+    plt.suptitle(plot_title, fontsize=16, fontweight='bold',
+                 y=1 - 0.45 / fig_height, color='white')
 
     return axes_list
 
@@ -804,12 +883,23 @@ def _create_plot(handler, axes_config, ranges, params, ml_info=None, cluster_inf
 
     plt.style.use('dark_background')
 
-    fig_width = 24 * axes_config['width_multiplier']
+    # Size the figure from the drawn panel size so the panels fill it. The
+    # colorbar sits to the right for cluster plots and below for everything
+    # else, so each mode reserves its band on a different axis.
+    n_panels = 1 if is_cluster_mode else params['n_channels']
+    fig_width = (
+        axes_config['panel_width'] + putils.YLABEL_BAND_IN + putils.RIGHT_MARGIN_IN
+    )
     if is_cluster_mode:
-        fig_height = 12 * axes_config['height_multiplier']
+        fig_width += putils.CLUSTER_COLORBAR_BAND_IN
+        colorbar_band = putils.PANEL_GAP_IN
     else:
-        fig_height = 12 * params['n_channels'] * axes_config['height_multiplier']
+        colorbar_band = putils.COLORBAR_BAND_IN
+    fig_height = putils.figure_height_for_panels(
+        axes_config['panel_height'], n_panels, colorbar_band=colorbar_band
+    )
 
+    logger.info("Figure size: %.1f x %.1f in", fig_width, fig_height)
     fig = plt.figure(figsize=(fig_width, fig_height))
     fig.patch.set_facecolor('black')
 
@@ -879,8 +969,8 @@ def plot_processed_echogram_main(ds_Sv, frequency_nominal, max_depth=None, min_d
             ``'range_sample'``, or ``'bins'`` (MVBS only).
         meters_per_second (float, optional): Speed in m/s for converting time
             to distance (required for ``x_axis_units='meters'``).
-        y_to_x_aspect_ratio_override (float, optional): Override aspect ratio
-            for plot.
+        y_to_x_aspect_ratio_override (float, optional): Force each panel to be
+            this many times wider than tall, bypassing the automatic clamp.
         ml_vmin (float, optional): Minimum color scale limit for ML data.
             Auto-determined from data if ``None``.
         ml_vmax (float, optional): Maximum color scale limit for ML data.
@@ -989,9 +1079,9 @@ def plot_cluster_echogram(ds_ml_ready, dataset_name, specific_data_name,
             Auto-detected from data if ``None``.
         min_depth (float, optional): Minimum depth in meters.
             Auto-detected from data if ``None``.
-        ping_min (int, optional): Start ping index. Defaults to 100.
+        ping_min (int, optional): Start ping index. Defaults to the first ping.
             For MVBS-derived data, converted to MVBS bin indices.
-        ping_max (int, optional): End ping index. Defaults to 800.
+        ping_max (int, optional): End ping index. Defaults to the last ping.
         x_axis_units (str): X-axis units: ``'seconds'`` (default), ``'pings'``,
             ``'bins'`` (MVBS only), or ``'meters'``.
         y_axis_units (str): Y-axis units: ``'meters'`` (default),
@@ -1000,7 +1090,8 @@ def plot_cluster_echogram(ds_ml_ready, dataset_name, specific_data_name,
             (auto-calculated from GPS if ``echodata`` provided).
         echodata (xarray.Dataset, optional): Original echodata for GPS-based
             calculations.
-        y_to_x_aspect_ratio_override (float, optional): Override aspect ratio.
+        y_to_x_aspect_ratio_override (float, optional): Force each panel to be
+            this many times wider than tall, bypassing the automatic clamp.
         gridded_data (xarray.DataArray, optional): Pre-gridded cluster data.
             If ``None``, will regrid from flattened format.
         ds_Sv_original (xarray.Dataset, optional): Original Sv dataset (needed
@@ -1027,12 +1118,14 @@ def plot_cluster_echogram(ds_ml_ready, dataset_name, specific_data_name,
         >>> plot_cluster_echogram(ds_ml, 'ml_data_clean', 'kmeans_clusters',
         ...                      min_depth=10, max_depth=100)
     """
-    # Set default ping range if not provided
+    # A None ping bound means the full extent. ds_Sv_original carries the ping
+    # axis these indices refer to for MVBS-derived clusters.
+    reference_ds = ds_Sv_original if ds_Sv_original is not None else ds_ml_ready
     if ping_min is None:
-        ping_min = 100
+        ping_min = 0
     if ping_max is None:
-        ping_max = 800
-    
+        ping_max = len(reference_ds['ping_time']) - 1
+
     full_result_name = f"{dataset_name}_{specific_data_name}"
     grid_result_name = f"{full_result_name}_grid"
     
@@ -1150,7 +1243,8 @@ def plot_sv_echogram(ds_Sv, ds_Sv_original=None, frequency_nominal=None, min_dep
             (auto-calculated from GPS if ``echodata`` provided).
         echodata (xarray.Dataset, optional): Original echodata for GPS-based
             calculations.
-        y_to_x_aspect_ratio_override (float, optional): Override aspect ratio.
+        y_to_x_aspect_ratio_override (float, optional): Force each panel to be
+            this many times wider than tall, bypassing the automatic clamp.
         overlay_lines (list, optional): List of line specification dicts for
             overlay lines.
         
@@ -1297,7 +1391,8 @@ def plot_flattened_data_echogram(ds_ml, ml_dataset_name, ds_Sv_original=None, fr
             (auto-calculated from GPS if ``echodata`` provided).
         echodata (xarray.Dataset, optional): Original echodata for GPS-based
             calculations.
-        y_to_x_aspect_ratio_override (float, optional): Override aspect ratio.
+        y_to_x_aspect_ratio_override (float, optional): Force each panel to be
+            this many times wider than tall, bypassing the automatic clamp.
         overlay_lines (list, optional): List of line specification dicts for
             overlay lines.
         
