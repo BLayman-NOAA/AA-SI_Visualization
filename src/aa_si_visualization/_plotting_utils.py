@@ -14,6 +14,13 @@ MAX_PANEL_WIDTH_IN = 60.0
 MIN_PANEL_ASPECT = 1 / 8
 MAX_PANEL_ASPECT = 3.0
 
+# Axis units the echogram plotters accept. Defined once because the entry
+# points validate the same set for MVBS, ML and cluster data, and a list that
+# only some of them know about is a plot that fails halfway through a pipeline.
+# 'bins' is MVBS-only; the non-MVBS paths reject it on its own.
+X_AXIS_UNITS = ('datetime', 'seconds', 'pings', 'bins', 'meters')
+Y_AXIS_UNITS = ('meters', 'range_sample', 'bins')
+
 # Chrome reserved around the panels, in inches.
 PANEL_GAP_IN = 1.1
 TITLE_BAND_IN = 1.2
@@ -291,13 +298,15 @@ def calculate_x_axis_extent(ping_times, ping_min, ping_max, x_axis_units,
                             handler=None):
     """Calculate x-axis extent and label for the requested unit system.
 
-    Supports 'seconds', 'pings', 'bins' (MVBS only), and 'meters'.
+    Supports 'datetime', 'seconds', 'pings', 'bins' (MVBS only), and 'meters'.
+    A 'datetime' extent is returned in matplotlib date numbers, which count
+    days; pair it with :func:`apply_datetime_x_axis` to label the ticks.
 
     Args:
         ping_times: Array of ping time values.
         ping_min: Minimum ping index (already converted for MVBS if needed).
         ping_max: Maximum ping index.
-        x_axis_units: One of 'seconds', 'pings', 'bins', or 'meters'.
+        x_axis_units: One of the values in :data:`X_AXIS_UNITS`.
         meters_per_second: Speed in m/s for distance conversion. If None and
             x_axis_units is 'meters', will attempt GPS calculation.
         echodata: Original echodata object for GPS speed calculation. Required
@@ -351,9 +360,7 @@ def calculate_x_axis_extent(ping_times, ping_min, ping_max, x_axis_units,
 
         return start * meters_per_second, end * meters_per_second, 'Distance (meters)'
 
-    valid = ['seconds', 'datetime', 'pings', 'meters']
-    if is_mvbs:
-        valid.append('bins')
+    valid = [u for u in X_AXIS_UNITS if u != 'bins' or is_mvbs]
     raise ValueError(f"Invalid x_axis_units '{x_axis_units}'. Valid options: {valid}")
 
 

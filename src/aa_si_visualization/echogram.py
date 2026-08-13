@@ -1332,12 +1332,12 @@ def plot_sv_echogram(ds_Sv, ds_Sv_original=None, frequency_nominal=None, min_dep
         logger.info("  Using ds_Sv_original for ping range conversion")
         
         # Validate axis units for MVBS
-        if x_axis_units not in ['seconds', 'datetime', 'pings', 'bins', 'meters']:
+        if x_axis_units not in putils.X_AXIS_UNITS:
             raise ValueError(f"Invalid x_axis_units '{x_axis_units}' for MVBS data. "
-                           f"Valid options: ['seconds', 'datetime', 'pings', 'bins', 'meters']")
-        if y_axis_units not in ['meters', 'range_sample', 'bins']:
+                           f"Valid options: {list(putils.X_AXIS_UNITS)}")
+        if y_axis_units not in putils.Y_AXIS_UNITS:
             raise ValueError(f"Invalid y_axis_units '{y_axis_units}' for MVBS data. "
-                           f"Valid options: ['meters', 'range_sample', 'bins']")
+                           f"Valid options: {list(putils.Y_AXIS_UNITS)}")
     else:
         logger.info("Detected regular Sv data format")
         
@@ -1506,12 +1506,12 @@ def plot_flattened_data_echogram(ds_ml, ml_dataset_name, ds_Sv_original=None, fr
         logger.info("  ML variable: %s", ml_var)
         logger.info("  Using original Sv dataset for ping range conversion")
         
-        if x_axis_units not in ['seconds', 'pings', 'bins', 'meters']:
+        if x_axis_units not in putils.X_AXIS_UNITS:
             raise ValueError(f"Invalid x_axis_units '{x_axis_units}' for MVBS-derived ML data. "
-                           f"Valid options: ['seconds', 'pings', 'bins', 'meters']")
-        if y_axis_units not in ['meters', 'range_sample', 'bins']:
+                           f"Valid options: {list(putils.X_AXIS_UNITS)}")
+        if y_axis_units not in putils.Y_AXIS_UNITS:
             raise ValueError(f"Invalid y_axis_units '{y_axis_units}' for MVBS-derived ML data. "
-                           f"Valid options: ['meters', 'range_sample', 'bins']")
+                           f"Valid options: {list(putils.Y_AXIS_UNITS)}")
     else:
         logger.info("Plotting ML echogram from regular Sv structure...")
         logger.info("  ML variable: %s", ml_var)
