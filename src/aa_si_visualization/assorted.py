@@ -70,7 +70,14 @@ def sv_differences_echograms(ds_Sv_baseline, ds_Sv_calibrated, frequencies, max_
     # Get data dimensions and create range/time axes for plotting
     freq_labels = [f"{int(f/1000)} kHz" for f in frequencies] 
 
-    # Calculate x-axis extent
+    # Calculate x-axis extent. This figure still sizes itself from the raw
+    # extent, and date numbers count days, so a datetime axis would come out
+    # with an unusable aspect rather than a readable plot.
+    if x_axis_units == 'datetime':
+        raise ValueError(
+            "x_axis_units='datetime' is not supported by "
+            "sv_differences_echograms; use 'seconds', 'pings', or 'meters'"
+        )
     ping_times = ds_Sv_baseline['ping_time'].values
     x_extent_min, x_extent_max, x_label = putils.calculate_x_axis_extent(
         ping_times, ping_min, ping_max, x_axis_units,

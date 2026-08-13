@@ -2,6 +2,7 @@
 
 import logging
 import numpy as np
+import pandas as pd
 from aa_si_utils import utils
 
 logger = logging.getLogger(__name__)
@@ -115,7 +116,8 @@ def calculate_plot_dimensions(x_extent_min, x_extent_max, y_extent_min,
 
 
 def calculate_panel_geometry(x_extent_min, x_extent_max, y_extent_min,
-                             y_extent_max, y_to_x_aspect_ratio_override=None):
+                             y_extent_max, y_to_x_aspect_ratio_override=None,
+                             x_range=None):
     """Calculate imshow extent and the drawn size of a single echogram panel.
 
     The panel shape follows the square of the data aspect, which is what the
@@ -130,6 +132,10 @@ def calculate_panel_geometry(x_extent_min, x_extent_max, y_extent_min,
         y_to_x_aspect_ratio_override: Optional panel width-to-height ratio.
             When given, the panel is exactly this many times wider than tall
             and the automatic clamp is skipped.
+        x_range: Optional x span to shape the panel with, for axes whose extent
+            is not in a unit comparable to depth. A datetime axis passes its
+            span in seconds so it draws like the 'seconds' axis rather than
+            being shaped by date numbers, which count days.
 
     Returns:
         dict: With keys ``extent`` (``[left, right, bottom, top]`` for imshow),
@@ -139,7 +145,8 @@ def calculate_panel_geometry(x_extent_min, x_extent_max, y_extent_min,
     """
     extent = [x_extent_min, x_extent_max, y_extent_max, y_extent_min]
 
-    x_range = abs(x_extent_max - x_extent_min)
+    if x_range is None:
+        x_range = abs(x_extent_max - x_extent_min)
     y_range = abs(y_extent_max - y_extent_min)
     data_aspect = y_range / x_range
 
@@ -185,6 +192,100 @@ def figure_height_for_panels(panel_height, n_panels,
     )
 
 
+def to_datetime64(value):
+    """Convert a timestamp-like value to a timezone-naive UTC datetime64.
+
+    Ping times are stored as naive UTC, so an offset-aware input is converted
+    to UTC before the offset is dropped.
+
+    Args:
+        value: Anything pandas can read as a timestamp: an ISO string, a
+            ``datetime``, a ``numpy.datetime64``, or a ``pandas.Timestamp``.
+
+    Returns:
+        numpy.datetime64: The value as naive UTC.
+
+    Raises:
+        ValueError: If the value cannot be parsed as a timestamp.
+    """
+    try:
+        stamp = pd.Timestamp(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"could not read {value!r} as a timestamp") from exc
+    if stamp.tz is not None:
+        stamp = stamp.tz_convert('UTC').tz_localize(None)
+    return stamp.to_datetime64()
+
+
+def _nearest_ping_index(ping_times, value, label):
+    """Find the ping closest to a requested time, warning if it falls outside."""
+    target = to_datetime64(value)
+    if target < ping_times[0] or target > ping_times[-1]:
+        logger.warning(
+            "%s=%s is outside the data (%s to %s); using the closest ping",
+            label, target, ping_times[0], ping_times[-1],
+        )
+    index = int(np.argmin(np.abs(ping_times - target)))
+    logger.info("  %s=%s resolved to ping %s (%s)",
+                label, target, index, ping_times[index])
+    return index
+
+
+def resolve_ping_bounds(ping_times, ping_min, ping_max,
+                        time_min=None, time_max=None):
+    """Resolve the displayed ping window, applying defaults and time bounds.
+
+    A time bound takes precedence over the matching ping index and is resolved
+    to the closest ping. A ``None`` bound means the full extent.
+
+    Args:
+        ping_times: Array of ping times for the dataset the indices refer to.
+        ping_min: Start ping index, or None for the first ping.
+        ping_max: End ping index, or None for the last ping.
+        time_min: Optional start timestamp, overriding ping_min.
+        time_max: Optional end timestamp, overriding ping_max.
+
+    Returns:
+        tuple: (ping_min, ping_max) as integer indices.
+
+    Raises:
+        ValueError: If the resolved window is empty or inverted.
+    """
+    if time_min is not None:
+        ping_min = _nearest_ping_index(ping_times, time_min, 'time_min')
+    elif ping_min is None:
+        ping_min = 0
+
+    if time_max is not None:
+        ping_max = _nearest_ping_index(ping_times, time_max, 'time_max')
+    elif ping_max is None:
+        ping_max = len(ping_times) - 1
+
+    if ping_min >= ping_max:
+        raise ValueError(
+            f"empty ping window: start ping {ping_min} is not before end ping "
+            f"{ping_max}"
+        )
+    return ping_min, ping_max
+
+
+def apply_datetime_x_axis(ax):
+    """Label an x-axis whose extent is in matplotlib date numbers.
+
+    Ticks land on round clock times and carry only the part that changes, with
+    the shared date shown once as the axis offset.
+
+    Args:
+        ax: matplotlib Axes to format.
+    """
+    import matplotlib.dates as mdates
+
+    locator = mdates.AutoDateLocator()
+    ax.xaxis.set_major_locator(locator)
+    ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator))
+    ax.xaxis.get_offset_text().set_color('white')
+
+
 def calculate_x_axis_extent(ping_times, ping_min, ping_max, x_axis_units,
                             meters_per_second=None, echodata=None,
                             handler=None):
@@ -211,6 +312,13 @@ def calculate_x_axis_extent(ping_times, ping_min, ping_max, x_axis_units,
             missing for the chosen unit.
     """
     is_mvbs = handler.is_mvbs_structured() if handler else False
+
+    if x_axis_units == 'datetime':
+        import matplotlib.dates as mdates
+
+        return (mdates.date2num(ping_times[ping_min]),
+                mdates.date2num(ping_times[ping_max]),
+                'Time (UTC)')
 
     if x_axis_units == 'seconds':
         start = (ping_times[ping_min] - ping_times[0]) / np.timedelta64(1, 's')
@@ -243,7 +351,7 @@ def calculate_x_axis_extent(ping_times, ping_min, ping_max, x_axis_units,
 
         return start * meters_per_second, end * meters_per_second, 'Distance (meters)'
 
-    valid = ['seconds', 'pings', 'meters']
+    valid = ['seconds', 'datetime', 'pings', 'meters']
     if is_mvbs:
         valid.append('bins')
     raise ValueError(f"Invalid x_axis_units '{x_axis_units}'. Valid options: {valid}")

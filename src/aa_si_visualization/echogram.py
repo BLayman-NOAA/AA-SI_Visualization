@@ -44,9 +44,10 @@ def _numeric_frequencies(frequency_nominal, n_channels):
 
 
 def _setup_parameters(ds_Sv, frequency_nominal, max_depth, min_depth, ping_min, ping_max,
-                     sv_vmin, sv_vmax, sv_cmap, ds_Sv_original, use_corrected_Sv, 
+                     sv_vmin, sv_vmax, sv_cmap, ds_Sv_original, use_corrected_Sv,
                      x_axis_units, y_axis_units, meters_per_second, y_to_x_aspect_ratio_override,
-                     ml_vmin, ml_vmax, echodata, ml_dataset_name, ml_specific_data_name):
+                     ml_vmin, ml_vmax, echodata, ml_dataset_name, ml_specific_data_name,
+                     time_min=None, time_max=None):
     """
     Setup and validate all parameters for echogram plotting.
     
@@ -60,10 +61,9 @@ def _setup_parameters(ds_Sv, frequency_nominal, max_depth, min_depth, ping_min, 
     # supplied the bounds index its ping axis, not ds_Sv's, because MVBS and ML
     # grids are converted back to that axis downstream.
     reference_ds = ds_Sv_original if ds_Sv_original is not None else ds_Sv
-    if ping_min is None:
-        ping_min = 0
-    if ping_max is None:
-        ping_max = len(reference_ds['ping_time']) - 1
+    ping_min, ping_max = putils.resolve_ping_bounds(
+        reference_ds['ping_time'].values, ping_min, ping_max, time_min, time_max
+    )
 
     # Get frequency labels if frequency_nominal provided
     freq_labels = None
@@ -377,7 +377,10 @@ def _filter_nan_frequencies(ds_Sv, sv_variable_name, params, cluster_info):
         raise ValueError("All frequencies contain only NaN data - nothing to plot")
     
     if len(valid_channels) < params['n_channels']:
-        logger.info("  Reduced from %s to %s valid frequencies", params['n_channels'], len(valid_channels))
+        # Dropping a channel silently changes what the figure shows, so this
+        # one carries past the default log level.
+        logger.warning("Plotting %s of %s frequencies; the rest are all NaN",
+                       len(valid_channels), params['n_channels'])
         params['n_channels'] = len(valid_channels)
     else:
         logger.info("  All %s frequencies contain valid data", params['n_channels'])
@@ -595,9 +598,17 @@ def _calculate_axes(handler, ranges, params, echodata):
         data_type,
     )
     
-    # Calculate the drawn size of one panel
+    # Calculate the drawn size of one panel. A datetime axis is laid out in
+    # date numbers, which count days, so shape the panel from the elapsed
+    # seconds instead and it draws like the 'seconds' axis.
+    shape_x_range = None
+    if params['x_axis_units'] == 'datetime':
+        elapsed = ping_times[ranges['ping']['max']] - ping_times[ranges['ping']['min']]
+        shape_x_range = elapsed / np.timedelta64(1, 's')
+
     geometry = putils.calculate_panel_geometry(
-        x_min, x_max, y_min, y_max, params['y_to_x_aspect_ratio_override']
+        x_min, x_max, y_min, y_max, params['y_to_x_aspect_ratio_override'],
+        x_range=shape_x_range,
     )
 
     # Log diagnostics
@@ -628,6 +639,7 @@ def _calculate_axes(handler, ranges, params, echodata):
     return {
         'x': {'min': x_min, 'max': x_max, 'label': x_label},
         'y': {'min': y_min, 'max': y_max, 'label': y_label},
+        'x_axis_units': params['x_axis_units'],
         'extent': geometry['extent'],
         'data_aspect': geometry['data_aspect'],
         'panel_aspect': geometry['panel_aspect'],
@@ -738,6 +750,9 @@ def _create_cluster_plot(fig, handler, axes_config, ranges, cluster_info, cluste
     ax.set_xlabel(axes_config['x']['label'], fontsize=10, color='white')
     ax.tick_params(colors='white')
 
+    if axes_config['x_axis_units'] == 'datetime':
+        putils.apply_datetime_x_axis(ax)
+
     # The cluster colorbar is vertical, so its band comes off the width.
     fig_width, fig_height = fig.get_size_inches()
     panel_right = 1 - (
@@ -824,6 +839,9 @@ def _create_multi_frequency_plot(fig, handler, axes_config, ranges, params):
                      fontsize=12, fontweight='bold', color='white', pad=20)
         ax.set_ylabel(axes_config['y']['label'], fontsize=10, color='white')
         ax.tick_params(colors='white')
+
+        if axes_config['x_axis_units'] == 'datetime':
+            putils.apply_datetime_x_axis(ax)
 
         if plot_idx == n_channels - 1:
             ax.set_xlabel(axes_config['x']['label'], fontsize=10, color='white')
@@ -934,13 +952,13 @@ def _create_plot(handler, axes_config, ranges, params, ml_info=None, cluster_inf
 def plot_processed_echogram_main(ds_Sv, frequency_nominal, max_depth=None, min_depth=None, 
                                 ping_min=0, ping_max=None, sv_vmin=-80, sv_vmax=-20, 
                                 sv_cmap='viridis', ds_Sv_original=None, use_corrected_Sv=False, 
-                                x_axis_units='seconds', y_axis_units='meters', 
+                                x_axis_units='datetime', y_axis_units='meters', 
                                 meters_per_second=None, y_to_x_aspect_ratio_override=None, 
                                 ml_vmin=None, ml_vmax=None, echodata=None, 
-                                ml_dataset_name=None, ml_specific_data_name=None, cluster_colors=None, 
+                                ml_dataset_name=None, ml_specific_data_name=None, cluster_colors=None,
                                 overlay_lines=None, save_image=None,
                                 save_formats=None, save_dir=None, show=None,
-                                dpi=None):
+                                dpi=None, time_min=None, time_max=None):
     """
     Create an echogram plot for MVBS (gridded), regular Sv data, or ML/normalized data.
     
@@ -956,6 +974,12 @@ def plot_processed_echogram_main(ds_Sv, frequency_nominal, max_depth=None, min_d
             For MVBS data, converted to appropriate MVBS indices. Defaults to 0.
         ping_max (int, optional): End ping index in the ORIGINAL Sv data.
             Defaults to last ping.
+        time_min (str or datetime, optional): Start of the displayed window as
+            a UTC timestamp, resolved to the closest ping. Takes precedence
+            over ``ping_min``.
+        time_max (str or datetime, optional): End of the displayed window as a
+            UTC timestamp, resolved to the closest ping. Takes precedence over
+            ``ping_max``.
         sv_vmin (float): Minimum color scale limit in dB. Defaults to -80.
         sv_vmax (float): Maximum color scale limit in dB. Defaults to -20.
         sv_cmap (str): Colormap for Sv data. Defaults to ``'viridis'``.
@@ -963,7 +987,8 @@ def plot_processed_echogram_main(ds_Sv, frequency_nominal, max_depth=None, min_d
             for MVBS data to convert ping indices properly).
         use_corrected_Sv (bool): Whether to use ``'Sv_corrected'`` instead of
             ``'Sv'``. Defaults to ``False``.
-        x_axis_units (str): X-axis units: ``'seconds'`` (default), ``'pings'``,
+        x_axis_units (str): X-axis units: ``'datetime'`` (default, absolute UTC
+            clock times), ``'seconds'`` from the first ping shown, ``'pings'``,
             ``'bins'`` (MVBS only), or ``'meters'``.
         y_axis_units (str): Y-axis units: ``'meters'`` (default),
             ``'range_sample'``, or ``'bins'`` (MVBS only).
@@ -1005,7 +1030,8 @@ def plot_processed_echogram_main(ds_Sv, frequency_nominal, max_depth=None, min_d
         ds_Sv, frequency_nominal, max_depth, min_depth, ping_min, ping_max,
         sv_vmin, sv_vmax, sv_cmap, ds_Sv_original, use_corrected_Sv,
         x_axis_units, y_axis_units, meters_per_second, y_to_x_aspect_ratio_override,
-        ml_vmin, ml_vmax, echodata, ml_dataset_name, ml_specific_data_name
+        ml_vmin, ml_vmax, echodata, ml_dataset_name, ml_specific_data_name,
+        time_min, time_max
     )
     logger.info("  Ping range: %s to %s", params['ping_min'], params['ping_max'])
     if params['ml_data_variable']:
@@ -1057,12 +1083,12 @@ def plot_processed_echogram_main(ds_Sv, frequency_nominal, max_depth=None, min_d
 
 def plot_cluster_echogram(ds_ml_ready, dataset_name, specific_data_name, 
                          max_depth=None, min_depth=None, ping_min=None, ping_max=None,
-                         x_axis_units='seconds', y_axis_units='meters', 
+                         x_axis_units='datetime', y_axis_units='meters', 
                          meters_per_second=None, echodata=None,
                          y_to_x_aspect_ratio_override=None, gridded_data=None,
                          ds_Sv_original=None, cluster_colors=None, overlay_lines=None,
                          save_image=None, save_formats=None, save_dir=None,
-                         show=None, dpi=None):
+                         show=None, dpi=None, time_min=None, time_max=None):
     """
     Plot cluster analysis results as echogram visualization.
     
@@ -1082,7 +1108,14 @@ def plot_cluster_echogram(ds_ml_ready, dataset_name, specific_data_name,
         ping_min (int, optional): Start ping index. Defaults to the first ping.
             For MVBS-derived data, converted to MVBS bin indices.
         ping_max (int, optional): End ping index. Defaults to the last ping.
-        x_axis_units (str): X-axis units: ``'seconds'`` (default), ``'pings'``,
+        time_min (str or datetime, optional): Start of the displayed window as
+            a UTC timestamp, resolved to the closest ping. Takes precedence
+            over ``ping_min``.
+        time_max (str or datetime, optional): End of the displayed window as a
+            UTC timestamp, resolved to the closest ping. Takes precedence over
+            ``ping_max``.
+        x_axis_units (str): X-axis units: ``'datetime'`` (default, absolute UTC
+            clock times), ``'seconds'`` from the first ping shown, ``'pings'``,
             ``'bins'`` (MVBS only), or ``'meters'``.
         y_axis_units (str): Y-axis units: ``'meters'`` (default),
             ``'range_sample'``, or ``'bins'`` (MVBS only).
@@ -1199,17 +1232,19 @@ def plot_cluster_echogram(ds_ml_ready, dataset_name, specific_data_name,
         save_dir=save_dir,
         show=show,
         dpi=dpi,
+        time_min=time_min,
+        time_max=time_max,
     )
 
 
 def plot_sv_echogram(ds_Sv, ds_Sv_original=None, frequency_nominal=None, min_depth=None, max_depth=None,
                      ping_min=0, ping_max=None, sv_vmin=-80, sv_vmax=-20, 
                      sv_cmap='viridis', use_corrected_Sv=False,
-                     x_axis_units='seconds', y_axis_units='meters',
+                     x_axis_units='datetime', y_axis_units='meters',
                      meters_per_second=None, echodata=None,
                      y_to_x_aspect_ratio_override=None, overlay_lines=None,
                      save_image=None, save_formats=None, save_dir=None,
-                     show=None, dpi=None
+                     show=None, dpi=None, time_min=None, time_max=None
                      ):
     """
     Plot Sv echogram data (regular or MVBS).
@@ -1230,12 +1265,19 @@ def plot_sv_echogram(ds_Sv, ds_Sv_original=None, frequency_nominal=None, min_dep
         ping_min (int, optional): Start ping index. Defaults to 0.
             For MVBS data: in ORIGINAL Sv indices (converted to MVBS bins).
         ping_max (int, optional): End ping index. Defaults to last ping.
+        time_min (str or datetime, optional): Start of the displayed window as
+            a UTC timestamp, resolved to the closest ping. Takes precedence
+            over ``ping_min``.
+        time_max (str or datetime, optional): End of the displayed window as a
+            UTC timestamp, resolved to the closest ping. Takes precedence over
+            ``ping_max``.
         sv_vmin (float): Minimum color scale limit in dB. Defaults to -80.
         sv_vmax (float): Maximum color scale limit in dB. Defaults to -20.
         sv_cmap (str): Colormap name. Defaults to ``'viridis'``.
         use_corrected_Sv (bool): Use ``'Sv_corrected'`` instead of ``'Sv'``.
             Defaults to ``False``.
-        x_axis_units (str): X-axis units: ``'seconds'`` (default), ``'pings'``,
+        x_axis_units (str): X-axis units: ``'datetime'`` (default, absolute UTC
+            clock times), ``'seconds'`` from the first ping shown, ``'pings'``,
             ``'bins'`` (MVBS only), or ``'meters'``.
         y_axis_units (str): Y-axis units: ``'meters'``, ``'range_sample'``, or
             ``'bins'`` (MVBS only).
@@ -1265,6 +1307,11 @@ def plot_sv_echogram(ds_Sv, ds_Sv_original=None, frequency_nominal=None, min_dep
         
         >>> # With distance on x-axis
         >>> plot_sv_echogram(ds_Sv, x_axis_units='meters', echodata=ed)
+
+        >>> # Window the display by clock time and label the axis with it
+        >>> plot_sv_echogram(ds_Sv, time_min='2024-10-15T12:30',
+        ...                  time_max='2024-10-15T14:00',
+        ...                  x_axis_units='datetime')
         
         >>> # MVBS with bin axes
         >>> plot_sv_echogram(ds_Sv_mvbs, ds_Sv_original=ds_Sv,
@@ -1285,9 +1332,9 @@ def plot_sv_echogram(ds_Sv, ds_Sv_original=None, frequency_nominal=None, min_dep
         logger.info("  Using ds_Sv_original for ping range conversion")
         
         # Validate axis units for MVBS
-        if x_axis_units not in ['seconds', 'pings', 'bins', 'meters']:
+        if x_axis_units not in ['seconds', 'datetime', 'pings', 'bins', 'meters']:
             raise ValueError(f"Invalid x_axis_units '{x_axis_units}' for MVBS data. "
-                           f"Valid options: ['seconds', 'pings', 'bins', 'meters']")
+                           f"Valid options: ['seconds', 'datetime', 'pings', 'bins', 'meters']")
         if y_axis_units not in ['meters', 'range_sample', 'bins']:
             raise ValueError(f"Invalid y_axis_units '{y_axis_units}' for MVBS data. "
                            f"Valid options: ['meters', 'range_sample', 'bins']")
@@ -1341,17 +1388,19 @@ def plot_sv_echogram(ds_Sv, ds_Sv_original=None, frequency_nominal=None, min_dep
         save_dir=save_dir,
         show=show,
         dpi=dpi,
+        time_min=time_min,
+        time_max=time_max,
     )
 
 
 def plot_flattened_data_echogram(ds_ml, ml_dataset_name, ds_Sv_original=None, frequency_nominal=None,
                      ml_specific_data_name=None, min_depth=None, max_depth=None,
                      ping_min=0, ping_max=None, ml_vmin=None, ml_vmax=None,
-                     sv_cmap='viridis', x_axis_units='seconds', y_axis_units='meters',
+                     sv_cmap='viridis', x_axis_units='datetime', y_axis_units='meters',
                      meters_per_second=None, echodata=None,
                      y_to_x_aspect_ratio_override=None, overlay_lines=None,
                      save_image=None, save_formats=None, save_dir=None,
-                     show=None, dpi=None
+                     show=None, dpi=None, time_min=None, time_max=None
                      ):
     """
     Plot ML-processed echogram data (regular Sv-derived or MVBS-derived).
@@ -1378,12 +1427,19 @@ def plot_flattened_data_echogram(ds_ml, ml_dataset_name, ds_Sv_original=None, fr
         ping_min (int, optional): Start ping index. Defaults to 0.
             For MVBS-derived: in ORIGINAL Sv indices (converted to MVBS bins).
         ping_max (int, optional): End ping index. Defaults to last ping.
+        time_min (str or datetime, optional): Start of the displayed window as
+            a UTC timestamp, resolved to the closest ping. Takes precedence
+            over ``ping_min``.
+        time_max (str or datetime, optional): End of the displayed window as a
+            UTC timestamp, resolved to the closest ping. Takes precedence over
+            ``ping_max``.
         ml_vmin (float, optional): Minimum color scale limit.
             Auto-detected from data if ``None``.
         ml_vmax (float, optional): Maximum color scale limit.
             Auto-detected from data if ``None``.
         sv_cmap (str): Colormap name. Defaults to ``'viridis'``.
-        x_axis_units (str): X-axis units: ``'seconds'`` (default), ``'pings'``,
+        x_axis_units (str): X-axis units: ``'datetime'`` (default, absolute UTC
+            clock times), ``'seconds'`` from the first ping shown, ``'pings'``,
             ``'bins'`` (MVBS only), or ``'meters'``.
         y_axis_units (str): Y-axis units: ``'meters'``, ``'range_sample'``, or
             ``'bins'`` (MVBS only).
@@ -1505,6 +1561,8 @@ def plot_flattened_data_echogram(ds_ml, ml_dataset_name, ds_Sv_original=None, fr
         save_dir=save_dir,
         show=show,
         dpi=dpi,
+        time_min=time_min,
+        time_max=time_max,
     )
 
 

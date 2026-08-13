@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: NOAA Fisheries
-"""Tests for full-extent ping bounds."""
+"""Tests for full-extent ping bounds and time-based windows."""
 
 import numpy as np
 import pandas as pd
@@ -25,11 +25,13 @@ def _dataset(n_pings):
     )
 
 
-def _ping_window(ds_Sv, ds_Sv_original, ping_min=None, ping_max=None):
+def _ping_window(ds_Sv, ds_Sv_original, ping_min=None, ping_max=None,
+                 time_min=None, time_max=None):
     params = _setup_parameters(
         ds_Sv, None, None, None, ping_min, ping_max, -80, -20, "viridis",
         ds_Sv_original, False, "seconds", "meters", None, None,
         None, None, None, None, None,
+        time_min, time_max,
     )
     return params["ping_min"], params["ping_max"]
 
@@ -56,3 +58,37 @@ def test_explicit_bounds_are_left_alone():
     ds = _dataset(N_ORIGINAL)
 
     assert _ping_window(ds, None, ping_min=100, ping_max=500) == (100, 500)
+
+
+def test_time_bounds_become_ping_indices():
+    # Pings run at 1 Hz from 11:42, so 11:52 is ping 600 and 12:02 is ping 1200.
+    ds = _dataset(N_ORIGINAL)
+
+    assert _ping_window(
+        ds, None,
+        time_min="2024-10-15T11:52", time_max="2024-10-15T12:02",
+    ) == (600, 1200)
+
+
+def test_time_bounds_override_ping_indices():
+    ds = _dataset(N_ORIGINAL)
+
+    assert _ping_window(
+        ds, None, ping_min=10, ping_max=20,
+        time_min="2024-10-15T11:52", time_max="2024-10-15T12:02",
+    ) == (600, 1200)
+
+
+def test_time_bounds_resolve_against_the_original_ping_axis():
+    """MVBS time bounds must land on original Sv indices, like ping bounds do.
+
+    MVBSHandler.calculate_ping_range converts them onto the MVBS grid
+    afterwards, so resolving against the coarse grid here would land 20x early.
+    """
+    ds_mvbs = _dataset(N_MVBS)
+    ds_original = _dataset(N_ORIGINAL)
+
+    assert _ping_window(
+        ds_mvbs, ds_original,
+        time_min="2024-10-15T11:52", time_max="2024-10-15T12:02",
+    ) == (600, 1200)
