@@ -15,6 +15,7 @@ import numpy as np
 from aa_si_utils import utils
 from ._artifact_output import configure_matplotlib_backend, render_figure
 from .echogram_handlers import create_handler
+from ._plotting_utils import RANGE_VARS, resolve_range_var
 from . import _plotting_utils as putils
 
 logger = logging.getLogger(__name__)
@@ -159,7 +160,7 @@ def _prepare_ml_data(ds_Sv, params):
     is_already_gridded = (
         'ping_time' in data_dims and 
         len(data_dims) == 2 and
-        ('range_sample' in data_dims or 'echo_range' in data_dims)
+        ('range_sample' in data_dims or bool(data_dims & set(RANGE_VARS)))
     )
     
     if is_already_gridded:
@@ -496,15 +497,17 @@ def _calculate_ranges(handler, params, ds_Sv_original):
         if data_type.startswith('Cluster'):
             # Cluster data - use handler's MVBS flag to determine approach
             if handler.is_mvbs_structured():
-                # MVBS-derived cluster - use echo_range values directly
+                # MVBS-derived cluster - use the 1D axis values directly
                 auto_min_depth = float(handler.echo_range_values[0])
                 auto_max_depth = float(handler.echo_range_values[-1])
             else:
                 # Sv-derived cluster - use utils helper without channel indexing
                 # Get a representative ping for depth range
                 try:
-                    echo_range_data = depth_ref_dataset['echo_range']
-                    # For Sv-derived data, echo_range is 2D (channel, ping_time) or 3D
+                    echo_range_data = depth_ref_dataset[
+                        resolve_range_var(depth_ref_dataset)
+                    ]
+                    # For Sv-derived data, the axis is 2D (channel, ping_time) or 3D
                     # Just use first available depth profile
                     if 'channel' in echo_range_data.dims:
                         depths_sample = echo_range_data.isel(

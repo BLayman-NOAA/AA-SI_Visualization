@@ -10,6 +10,7 @@ import logging
 import numpy as np
 from abc import ABC, abstractmethod
 from aa_si_utils import utils
+from ._plotting_utils import RANGE_VARS, resolve_range_var
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 def _closest_index_in_1d(values, target):
     """Return the index in a 1D array closest to ``target``, ignoring NaN.
 
-    MVBS ``echo_range`` can be NaN-padded at depth (e.g. when derived from
+    An MVBS vertical axis can be NaN-padded at depth (e.g. when derived from
     multi-channel Sv with differing sample counts). Plain ``np.argmin`` would
     return the index of the first NaN rather than the closest valid depth, so
     mask NaNs out here.
@@ -25,8 +26,8 @@ def _closest_index_in_1d(values, target):
     diff = np.abs(np.asarray(values) - target)
     if np.all(np.isnan(diff)):
         raise ValueError(
-            "echo_range is entirely NaN; cannot resolve a range index for the "
-            "target depth"
+            "the vertical axis is entirely NaN; cannot resolve a range index "
+            "for the target depth"
         )
     return int(np.nanargmin(diff))
 
@@ -139,7 +140,8 @@ class SvDataHandler(EchogramDataHandler):
     
     def detect_structure(self):
         """Analyze regular Sv dataset structure."""
-        self.echo_range_coord = self.dataset['echo_range']
+        self.range_var = resolve_range_var(self.dataset, self.sv_variable_name)
+        self.echo_range_coord = self.dataset[self.range_var]
         self.is_mvbs = False
         self.ping_times = self.dataset['ping_time'].values
         
@@ -195,14 +197,15 @@ class MvbsDataHandler(EchogramDataHandler):
     
     def detect_structure(self):
         """Analyze MVBS dataset structure."""
-        self.echo_range_coord = self.dataset['echo_range']
+        self.range_var = resolve_range_var(self.dataset, self.sv_variable_name)
+        self.echo_range_coord = self.dataset[self.range_var]
         self.echo_range_values = self.echo_range_coord.values  # 1D array
         self.is_mvbs = True
         self.ping_times = self.dataset['ping_time'].values
         
         return {
             'type': 'MVBS',
-            'dimensions': ['channel', 'ping_time', 'echo_range']
+            'dimensions': ['channel', 'ping_time', self.range_var]
         }
     
     def calculate_depth_indices(self, min_depth, max_depth):
@@ -258,13 +261,13 @@ class MvbsDataHandler(EchogramDataHandler):
         
         # Discover feature dimension
         feature_dim = [d for d in self.dataset[self.sv_variable_name].dims 
-                      if d not in ['ping_time', 'echo_range']][0]
+                      if d not in ['ping_time', self.range_var]][0]
         
         # Build slice dictionary with dynamic dimension name
         slice_dict = {
             feature_dim: freq_idx,
             'ping_time': slice(ping_min, ping_max),
-            'echo_range': slice(depth_min, depth_max)
+            self.range_var: slice(depth_min, depth_max)
         }
         
         return self.dataset[self.sv_variable_name].isel(**slice_dict)
@@ -366,15 +369,16 @@ class ClusterDataHandler(EchogramDataHandler):
     
     def detect_structure(self):
         """Analyze cluster data structure. Can be derived from Sv or MVBS."""
-        self.echo_range_coord = self.dataset['echo_range']
+        self.range_var = resolve_range_var(self.dataset, self.sv_variable_name)
+        self.echo_range_coord = self.dataset[self.range_var]
         self.ping_times = self.dataset['ping_time'].values
         
-        # Determine if MVBS-derived (1D echo_range) or Sv-derived (2D echo_range)
+        # Determine if MVBS-derived (1D axis) or Sv-derived (2D axis)
         if len(self.echo_range_coord.dims) == 1:
             self.is_mvbs = True
             self.echo_range_values = self.echo_range_coord.values
             data_type = 'Cluster-MVBS'
-            dimensions = ['ping_time', 'echo_range']
+            dimensions = ['ping_time', self.range_var]
         else:
             self.is_mvbs = False
             data_type = 'Cluster-Sv'
@@ -448,7 +452,7 @@ class ClusterDataHandler(EchogramDataHandler):
             # MVBS structure
             return self.dataset[self.sv_variable_name].isel(
                 ping_time=slice(ping_min, ping_max),
-                echo_range=slice(depth_min, depth_max)
+                **{self.range_var: slice(depth_min, depth_max)}
             )
         else:
             # Sv structure
@@ -483,7 +487,7 @@ def create_handler(ds_Sv, sv_variable_name, ml_data_variable=None):
         is_cluster_data = (
             'ping_time' in data_dims and 
             len(data_dims) == 2 and
-            ('range_sample' in data_dims or 'echo_range' in data_dims)
+            ('range_sample' in data_dims or bool(data_dims & set(RANGE_VARS)))
         )
         
         if is_cluster_data:
@@ -494,22 +498,24 @@ def create_handler(ds_Sv, sv_variable_name, ml_data_variable=None):
             return handler
     
     # Determine handler type based on data characteristics
+    range_var = resolve_range_var(ds_Sv, sv_variable_name)
+
     if ml_data_variable is None:
         # Regular Sv or MVBS data
-        if 'echo_range' in ds_Sv[sv_variable_name].coords:
-            # MVBS has 1D echo_range, regular Sv has multi-dimensional
-            if len(ds_Sv['echo_range'].dims) == 1:
+        if range_var is not None and range_var in ds_Sv[sv_variable_name].coords:
+            # MVBS has a 1D vertical axis, regular Sv has a multi-dimensional one
+            if len(ds_Sv[range_var].dims) == 1:
                 logger.info("Creating MVBS handler")
                 handler = MvbsDataHandler(ds_Sv, sv_variable_name)
             else:
                 logger.info("Creating regular Sv handler")
                 handler = SvDataHandler(ds_Sv, sv_variable_name)
         else:
-            logger.info("Creating regular Sv handler (no echo_range check)")
+            logger.info("Creating regular Sv handler (no vertical axis check)")
             handler = SvDataHandler(ds_Sv, sv_variable_name)
     else:
         # ML data
-        if len(ds_Sv['echo_range'].dims) == 1:
+        if len(ds_Sv[range_var].dims) == 1:
             logger.info("Creating ML-MVBS handler")
             handler = MlMvbsDataHandler(ds_Sv, sv_variable_name)
         else:

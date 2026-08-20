@@ -30,11 +30,46 @@ RIGHT_MARGIN_IN = 0.4
 CLUSTER_COLORBAR_BAND_IN = 1.8
 
 
+RANGE_VARS = ('echo_range', 'depth')
+"""Meter-valued vertical coordinates a dataset may be gridded on.
+
+``compute_MVBS`` names its range coordinate after the variable it binned
+along, so a dataset gridded on depth carries ``depth`` where one gridded on
+range from the transducer carries ``echo_range``.
+"""
+
+
+def resolve_range_var(ds, sv_variable_name=None):
+    """Find which vertical coordinate a dataset is gridded on.
+
+    Args:
+        ds: xarray.Dataset to inspect.
+        sv_variable_name: Optional variable whose dimensions are checked
+            first.  A name appearing there is the gridded axis, which
+            separates it from a variable merely riding along in the dataset.
+
+    Returns:
+        str or None: The member of :data:`RANGE_VARS` the dataset uses, or
+        None when it carries neither.
+    """
+    if sv_variable_name is not None and sv_variable_name in ds:
+        dims = set(ds[sv_variable_name].dims)
+        for name in RANGE_VARS:
+            if name in dims:
+                return name
+
+    for name in RANGE_VARS:
+        if name in ds.coords or name in ds.data_vars:
+            return name
+
+    return None
+
+
 def is_mvbs_dataset(ds):
     """Check whether a dataset uses the MVBS (gridded) structure.
 
-    MVBS datasets have a 1D ``echo_range`` coordinate, while regular Sv
-    datasets have a multi-dimensional one.
+    MVBS datasets have a 1D vertical coordinate, while regular Sv datasets
+    have a multi-dimensional one.
 
     Args:
         ds: xarray.Dataset to check.
@@ -42,9 +77,10 @@ def is_mvbs_dataset(ds):
     Returns:
         bool: True if the dataset has MVBS structure.
     """
-    if 'echo_range' not in ds.coords:
+    range_var = resolve_range_var(ds)
+    if range_var is None or range_var not in ds.coords:
         return False
-    return len(ds['echo_range'].dims) == 1
+    return len(ds[range_var].dims) == 1
 
 
 def calculate_y_axis_extent(min_depth_shown, max_depth_shown, min_depth_index,
